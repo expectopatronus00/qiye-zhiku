@@ -1,0 +1,75 @@
+# 企业智库 RAG 配置模板
+# 复制为 config.yaml 后修改
+
+# 服务配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+# LLM 配置
+llm:
+  # 可选: ollama | openai
+  provider: "ollama"
+  # Ollama 模型名
+  model: "qwen2.5:7b"
+  # OpenAI 配置（provider 为 openai 时使用）
+  openai_api_key: ""
+  openai_base_url: "https://api.openai.com/v1"
+  # 生成参数
+  temperature: 0.3
+  max_tokens: 2048
+
+# 嵌入模型配置
+embedding:
+  # 可选: ollama | openai | local
+  provider: "ollama"
+  model: "nomic-embed-text"
+  # OpenAI 配置（provider 为 openai 时使用）
+  openai_api_key: ""
+  openai_base_url: "https://api.openai.com/v1"
+  # 本地模型路径（provider 为 local 时使用）
+  local_model_path: ""
+
+# 向量数据库配置
+vectorstore:
+  # 可选: chroma | faiss
+  type: "chroma"
+  # 持久化目录
+  persist_directory: "./data/vectorstore"
+  # 向量维度（需与嵌入模型匹配）
+  dimension: 768
+
+# 文档处理配置
+document:
+  # 分块大小（字符数）
+  chunk_size: 500
+  # 分块重叠（字符数）
+  chunk_overlap: 50
+  # 支持的文件类型
+  allowed_extensions:
+    - ".pdf"
+    - ".docx"
+    - ".xlsx"
+    - ".md"
+    - ".txt"
+    - ".csv"
+  # 上传文件存储目录
+  upload_directory: "./data/uploads"
+
+# 检索配置
+retrieval:
+  # 返回的文档块数量
+  top_k: 5
+  # 相似度阈值（0-1）
+  score_threshold: 0.5
+  # 是否启用混合检索（向量 + BM25）
+  hybrid_search: true
+  # BM25 权重（0-1，0 表示纯向量检索）
+  bm25_weight: 0.3
+
+# 数据目录
+data:
+  uploads: "./data/uploads"
+  vectorstore: "./data/vectorstore"
+  logs: "./data/logs"
