@@ -125,6 +125,7 @@ qiye-zhiku/
 | 2026-08-01 | v0.1 | 项目骨架：FastAPI + ChromaDB + 基础 RAG + Web UI |
 | 2026-08-02 | v0.2 | 多轮对话：对话历史管理、会话持久化、上下文窗口、对话列表 UI |
 | 2026-08-03 | v0.3 | Query 改写（追问补全）+ BM25 中文分词 + 相似度阈值过滤 + 单元测试 |
+| 2026-08-03 | v0.3.1 | 本地全链路验证：qwen2.5:7b 导入 Ollama，文档上传→混合检索→LLM 回答→多轮追问改写全流程实测通过 |
 | ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景
@@ -137,7 +138,7 @@ qiye-zhiku/
 
 ## 技术栈
 
-- **后端**: FastAPI + LangChain + ChromaDB
+- **后端**: FastAPI + ChromaDB
 - **LLM**: Ollama (本地) / OpenAI API (云端)
 - **嵌入**: nomic-embed-text / text2vec-chinese
 - **前端**: 原生 HTML + TailwindCSS
