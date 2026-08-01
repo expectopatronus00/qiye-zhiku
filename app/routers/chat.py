@@ -1,4 +1,4 @@
-"""对话 API 路由 - v0.2 支持多轮对话"""
+"""对话 API 路由 - v0.3 支持 Query 改写"""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from app.core.llm import LLMService
 from app.core.retriever import Retriever
 from app.core.conversation import conversation_manager
+from app.core.query_rewriter import query_rewriter
 
 router = APIRouter()
 
@@ -31,6 +32,7 @@ class ChatRequest(BaseModel):
     use_rag: bool = True
     stream: bool = False
     conversation_id: Optional[str] = None  # 对话 ID，为空则创建新对话
+    rewrite_query: bool = True  # 是否启用 Query 改写
 
 
 class ChatResponse(BaseModel):
@@ -39,6 +41,7 @@ class ChatResponse(BaseModel):
     sources: list[dict] = []
     model: str = ""
     conversation_id: str = ""
+    rewritten_query: Optional[str] = None  # 改写后的查询（仅发生改写时返回）
 
 
 class ConversationInfo(BaseModel):
@@ -96,29 +99,36 @@ async def clear_conversation(conversation_id: str):
     raise HTTPException(status_code=404, detail="对话不存在")
 
 
-# ========== 对话接口 ==========
+# ========== RAG 核心逻辑（共享） ==========
 
-@router.post("/completions", response_model=ChatResponse)
-async def chat_completion(request: ChatRequest):
-    """非流式对话接口（支持多轮）"""
-    llm = LLMService()
+async def _prepare_rag_messages(
+    llm: LLMService,
+    conv,
+    request: ChatRequest,
+) -> tuple[list[dict], list[dict], Optional[str]]:
+    """构建 RAG 消息列表 + 来源 + 改写后查询
 
-    # 获取或创建对话
-    if request.conversation_id:
-        conv = conversation_manager.get(request.conversation_id)
-        if not conv:
-            raise HTTPException(status_code=404, detail="对话不存在")
-    else:
-        conv = conversation_manager.create(collection_name=request.collection_name)
-
-    # 记录用户消息
+    返回: (messages, sources, rewritten_query)
+    """
+    # 记录用户消息（先存历史，供 Query 改写参考）
     conv.add_message("user", request.message)
 
-    sources = []
+    # 获取历史（不含刚添加的当前消息）
+    history = conv.get_history(max_turns=5)[:-1]
+
+    # Query 改写：把追问补全为独立查询
+    rewritten_query = request.message
+    query_changed = False
+    if request.use_rag and request.rewrite_query:
+        rewritten_query, query_changed = await query_rewriter.process(
+            request.message, history
+        )
+
     if request.use_rag:
-        # RAG 模式：先检索再生成
+        # 检索（用改写后的查询）
         retriever = Retriever(collection_name=conv.collection_name)
-        docs = await retriever.retrieve(request.message)
+        docs = await retriever.retrieve(rewritten_query)
+
         sources = [
             {
                 "content": doc["content"][:200] + "...",
@@ -133,22 +143,44 @@ async def chat_completion(request: ChatRequest):
             for doc in docs
         )
 
-        # 构建消息列表：system + 历史对话 + 当前用户消息
         messages = [
             {"role": "system", "content": RAG_SYSTEM_PROMPT.format(context=context)},
         ]
-        # 插入历史对话（不含刚添加的当前消息）
-        history = conv.get_history(max_turns=5)[:-1]  # 去掉最后一条（当前用户消息）
         messages.extend(history)
         messages.append({"role": "user", "content": request.message})
+
+        return messages, sources, (rewritten_query if query_changed else None)
     else:
         # 直接对话模式
         messages = [
             {"role": "system", "content": "你是一个专业的企业知识库问答助手。"},
         ]
-        history = conv.get_history(max_turns=5)[:-1]
         messages.extend(history)
         messages.append({"role": "user", "content": request.message})
+
+        return messages, [], None
+
+
+def _get_or_create_conv(request: ChatRequest):
+    """获取或创建对话"""
+    if request.conversation_id:
+        conv = conversation_manager.get(request.conversation_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="对话不存在")
+    else:
+        conv = conversation_manager.create(collection_name=request.collection_name)
+    return conv
+
+
+# ========== 对话接口 ==========
+
+@router.post("/completions", response_model=ChatResponse)
+async def chat_completion(request: ChatRequest):
+    """非流式对话接口（多轮 + Query 改写）"""
+    llm = LLMService()
+    conv = _get_or_create_conv(request)
+
+    messages, sources, rewritten_query = await _prepare_rag_messages(llm, conv, request)
 
     answer = await llm.chat(messages)
 
@@ -160,47 +192,17 @@ async def chat_completion(request: ChatRequest):
         sources=sources,
         model=llm.model,
         conversation_id=conv.id,
+        rewritten_query=rewritten_query,
     )
 
 
 @router.post("/stream")
 async def chat_stream(request: ChatRequest):
-    """流式对话接口（支持多轮）"""
+    """流式对话接口（多轮 + Query 改写）"""
     llm = LLMService()
+    conv = _get_or_create_conv(request)
 
-    # 获取或创建对话
-    if request.conversation_id:
-        conv = conversation_manager.get(request.conversation_id)
-        if not conv:
-            raise HTTPException(status_code=404, detail="对话不存在")
-    else:
-        conv = conversation_manager.create(collection_name=request.collection_name)
-
-    # 记录用户消息
-    conv.add_message("user", request.message)
-
-    if request.use_rag:
-        retriever = Retriever(collection_name=conv.collection_name)
-        docs = await retriever.retrieve(request.message)
-
-        context = "\n\n---\n\n".join(
-            f"[来源: {doc.get('metadata', {}).get('filename', '未知')}]\n{doc['content']}"
-            for doc in docs
-        )
-
-        messages = [
-            {"role": "system", "content": RAG_SYSTEM_PROMPT.format(context=context)},
-        ]
-        history = conv.get_history(max_turns=5)[:-1]
-        messages.extend(history)
-        messages.append({"role": "user", "content": request.message})
-    else:
-        messages = [
-            {"role": "system", "content": "你是一个专业的企业知识库问答助手。"},
-        ]
-        history = conv.get_history(max_turns=5)[:-1]
-        messages.extend(history)
-        messages.append({"role": "user", "content": request.message})
+    messages, sources, rewritten_query = await _prepare_rag_messages(llm, conv, request)
 
     full_response = []
 
@@ -210,11 +212,15 @@ async def chat_stream(request: ChatRequest):
             yield f"data: {chunk}\n\n"
 
         # 流结束后保存助手回复
-        conv.add_message("assistant", "".join(full_response))
+        conv.add_message("assistant", "".join(full_response), sources=sources)
         yield "data: [DONE]\n\n"
+
+    headers = {"X-Conversation-Id": conv.id}
+    if rewritten_query:
+        headers["X-Rewritten-Query"] = rewritten_query
 
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"X-Conversation-Id": conv.id},
+        headers=headers,
     )

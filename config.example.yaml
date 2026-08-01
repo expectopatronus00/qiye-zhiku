@@ -68,6 +68,13 @@ retrieval:
   # BM25 权重（0-1，0 表示纯向量检索）
   bm25_weight: 0.3
 
+# Query 改写配置（多轮对话追问补全）
+query_rewrite:
+  # 是否启用 Query 改写
+  enabled: true
+  # 改写时参考的最大历史轮数
+  max_history_turns: 4
+
 # 数据目录
 data:
   uploads: "./data/uploads"

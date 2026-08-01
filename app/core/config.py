@@ -48,6 +48,11 @@ class RetrievalConfig(BaseModel):
     bm25_weight: float = 0.3
 
 
+class QueryRewriteConfig(BaseModel):
+    enabled: bool = True
+    max_history_turns: int = 4
+
+
 class DataConfig(BaseModel):
     uploads: str = "./data/uploads"
     vectorstore: str = "./data/vectorstore"
@@ -61,6 +66,7 @@ class Settings(BaseModel):
     vectorstore: VectorStoreConfig = VectorStoreConfig()
     document: DocumentConfig = DocumentConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
+    query_rewrite: QueryRewriteConfig = QueryRewriteConfig()
     data: DataConfig = DataConfig()
 
 
