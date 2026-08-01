@@ -11,7 +11,7 @@ from app.routers import chat, documents, knowledge
 app = FastAPI(
     title="企业智库 RAG 问答系统",
     description="面向央企 AI 场景的私有化知识库问答引擎",
-    version="0.1.0",
+    version="0.3.0",
 )
 
 # 注册路由
@@ -20,7 +20,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["文档"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["知识库"])
 
 # 静态文件
-static_dir = Path(__file__).parent / "static"
+static_dir = Path(__file__).parent / "app" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 

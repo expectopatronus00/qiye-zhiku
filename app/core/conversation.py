@@ -73,7 +73,7 @@ class ConversationManager:
 
     def __init__(self):
         self._conversations: dict[str, Conversation] = {}
-        self._data_dir = Path(settings.data.data_dir) / "conversations"
+        self._data_dir = Path(settings.data.conversations)
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._load_all()
 

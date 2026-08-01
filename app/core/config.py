@@ -57,6 +57,7 @@ class DataConfig(BaseModel):
     uploads: str = "./data/uploads"
     vectorstore: str = "./data/vectorstore"
     logs: str = "./data/logs"
+    conversations: str = "./data/conversations"
 
 
 class Settings(BaseModel):

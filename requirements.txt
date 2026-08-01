@@ -4,10 +4,8 @@ uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
 # LLM & RAG
-langchain==0.3.1
-langchain-community==0.3.1
-langchain-chroma==0.2.0
-chromadb==0.5.7
+# chromadb 1.x 使用 Rust 实现，Windows 有预编译二进制（0.5.x 的 chroma-hnswlib 需要 C++ 编译器）
+chromadb>=1.5,<2
 
 # Document parsing
 pypdf==4.3.1
