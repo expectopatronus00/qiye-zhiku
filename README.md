@@ -13,13 +13,14 @@
 
 ## 核心特性
 
+- **多轮对话**：支持上下文关联的连续对话，自动管理对话历史，可切换/删除/新建会话
 - **数据不出域**：支持 Ollama 本地大模型部署，全程无需联网调用外部 API
 - **多格式文档**：支持 PDF、Word、Excel、Markdown、TXT 等格式导入
 - **智能分块**：自适应文档分块策略，保留上下文完整性
 - **混合检索**：向量语义检索 + BM25 关键词检索，双路召回
 - **知识溯源**：每个回答都标注来源文档和具体段落
 - **多知识库**：支持创建多个独立知识库，按项目/部门隔离
-- **Web 界面**：开箱即用的对话式交互界面
+- **Web 界面**：开箱即用的对话式交互界面，含对话列表管理
 - **API 优先**：RESTful API 设计，方便集成到现有系统
 
 ## 快速开始
@@ -91,16 +92,18 @@ qiye-zhiku/
 ├── config.yaml             # 运行配置
 ├── config.example.yaml     # 配置模板
 ├── requirements.txt        # Python 依赖
+├── ROADMAP.md              # 迭代路线图
 ├── app/
 │   ├── core/               # 核心模块
 │   │   ├── config.py       # 配置管理
+│   │   ├── conversation.py # 对话历史管理
 │   │   ├── document.py     # 文档处理
 │   │   ├── embeddings.py   # 向量嵌入
 │   │   ├── llm.py          # LLM 调用
 │   │   ├── retriever.py    # 检索引擎
 │   │   └── vectorstore.py  # 向量存储
 │   ├── routers/            # API 路由
-│   │   ├── chat.py         # 对话接口
+│   │   ├── chat.py         # 对话接口（含多轮对话）
 │   │   ├── documents.py    # 文档管理
 │   │   └── knowledge.py    # 知识库管理
 │   └── static/             # 前端界面
@@ -116,9 +119,9 @@ qiye-zhiku/
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
-| Day 1  | v0.1 | 项目骨架 + 基础 RAG 流程 |
-| Day 2  | v0.2 | 多格式文档解析 |
-| ...  | ...  | 持续迭代中 |
+| 2026-08-01 | v0.1 | 项目骨架：FastAPI + ChromaDB + 基础 RAG + Web UI |
+| 2026-08-02 | v0.2 | 多轮对话：对话历史管理、会话持久化、上下文窗口、对话列表 UI |
+| ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景
 
