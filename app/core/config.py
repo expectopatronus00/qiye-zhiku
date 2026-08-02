@@ -1,7 +1,7 @@
 """配置管理模块 - 从 config.yaml 加载配置"""
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import yaml
 
 
@@ -53,6 +53,14 @@ class QueryRewriteConfig(BaseModel):
     max_history_turns: int = 4
 
 
+class RerankerConfig(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+    enabled: bool = True
+    type: str = "heuristic"  # cross_encoder | heuristic | none
+    model_path: str = ""
+    top_n: int = 5
+
+
 class DataConfig(BaseModel):
     uploads: str = "./data/uploads"
     vectorstore: str = "./data/vectorstore"
@@ -68,6 +76,7 @@ class Settings(BaseModel):
     document: DocumentConfig = DocumentConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     query_rewrite: QueryRewriteConfig = QueryRewriteConfig()
+    reranker: RerankerConfig = RerankerConfig()
     data: DataConfig = DataConfig()
 
 

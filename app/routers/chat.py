@@ -133,7 +133,10 @@ async def _prepare_rag_messages(
             {
                 "content": doc["content"][:200] + "...",
                 "metadata": doc.get("metadata", {}),
+                "filename": doc.get("metadata", {}).get("filename", "未知"),
                 "score": doc.get("score", 0),
+                "original_score": doc.get("original_score", 0),
+                "reranker": doc.get("reranker", None),
             }
             for doc in docs
         ]

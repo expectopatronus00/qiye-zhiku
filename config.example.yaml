@@ -75,6 +75,20 @@ query_rewrite:
   # 改写时参考的最大历史轮数
   max_history_turns: 4
 
+# 重排序配置
+reranker:
+  # 是否启用重排序
+  enabled: true
+  # 重排序方式: cross_encoder | heuristic | none
+  #   cross_encoder: 本地交叉编码器模型精排（精度最高）
+  #   heuristic: 零依赖启发式精排（查询词覆盖率 + 原始分数 + 位置）
+  #   模型缺失或加载失败时自动降级为 heuristic
+  type: "heuristic"
+  # cross_encoder 模型路径（本地目录，如 BAAI/bge-reranker-base）
+  model_path: ""
+  # 精排后返回的条数
+  top_n: 5
+
 # 数据目录
 data:
   uploads: "./data/uploads"

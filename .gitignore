@@ -27,3 +27,6 @@ config.yaml
 
 # Logs
 *.log
+
+*.log.err
+server.log*

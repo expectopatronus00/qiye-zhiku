@@ -4,11 +4,15 @@ Day 3 优化：
 - BM25 中文分词（jieba），解决按空格切词导致中文检索失效的问题
 - 应用 score_threshold 相似度阈值过滤低质量结果
 - 向量检索支持按阈值过滤
+
+Day 4 优化：
+- 集成 Reranker 精排（cross-encoder / 启发式降级）
 """
 from typing import Optional
 from app.core.config import settings
 from app.core.vectorstore import VectorStore
 from app.core.embeddings import EmbeddingService
+from app.core.reranker import reranker
 
 
 def _tokenize(text: str) -> list[str]:
@@ -49,18 +53,19 @@ class Retriever:
         vector_results = self._filter_by_threshold(vector_results)
 
         if not self.hybrid:
-            return vector_results
+            return reranker.rerank(query, vector_results)
 
         # 混合检索：结合 BM25
         try:
             bm25_results = self._bm25_search(query, top_k=self.top_k)
             if bm25_results:
-                return self._merge_results(vector_results, bm25_results)
+                merged = self._merge_results(vector_results, bm25_results)
+                return reranker.rerank(query, merged)
         except Exception:
             # BM25 失败时退回纯向量检索
             pass
 
-        return vector_results
+        return reranker.rerank(query, vector_results)
 
     def _filter_by_threshold(self, results: list[dict]) -> list[dict]:
         """按相似度阈值过滤（vectorstore 的 score 已是 1-distance 相似度）"""
