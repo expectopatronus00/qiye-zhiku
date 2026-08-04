@@ -56,6 +56,17 @@ document:
     - ".csv"
   # 上传文件存储目录
   upload_directory: "./data/uploads"
+  # ---- 文档增强 (v0.5) ----
+  # PDF 版面分析: 大于等于该字号(points)的文本块判定为标题
+  heading_min_size: 13.0
+  # PDF 表格识别并转换为 Markdown 入库
+  table_to_markdown: true
+  # PDF 内嵌图片 OCR（RapidOCR，模型内置）
+  ocr_enabled: true
+  # 每页最多 OCR 的图片数
+  ocr_max_images_per_page: 3
+  # 参与 OCR 的最小图片面积(px²)，过滤小图标
+  ocr_min_area: 8000
 
 # 检索配置
 retrieval:

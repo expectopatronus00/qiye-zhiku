@@ -39,6 +39,12 @@ class DocumentConfig(BaseModel):
     chunk_overlap: int = 50
     allowed_extensions: list[str] = [".pdf", ".docx", ".xlsx", ".md", ".txt", ".csv"]
     upload_directory: str = "./data/uploads"
+    # ---- 文档增强 (v0.5) ----
+    heading_min_size: float = 13.0      # PDF 版面分析: 大于等于该字号判定为标题
+    table_to_markdown: bool = True      # PDF 表格识别并转 Markdown
+    ocr_enabled: bool = True            # PDF 内嵌图片 OCR
+    ocr_max_images_per_page: int = 3    # 每页最多 OCR 的图片数
+    ocr_min_area: int = 8000            # 参与 OCR 的最小图片面积(px²)，过滤小图标
 
 
 class RetrievalConfig(BaseModel):

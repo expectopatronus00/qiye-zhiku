@@ -16,6 +16,7 @@
 - **多轮对话**：支持上下文关联的连续对话，自动管理对话历史，可切换/删除/新建会话
 - **Query 改写**：多轮追问自动补全上下文（"那部署方式呢"→完整独立查询），显著提升追问检索准确率
 - **检索重排**：cross-encoder 语义精排（bge-reranker-base），模型缺失时自动降级启发式精排
+- **PDF 版面分析**：标题/正文按字号识别（带 bbox 定位），表格自动转 Markdown，图片 OCR 提取文字入库
 - **中文分词检索**：BM25 基于 jieba 中文分词，解决中文关键词检索失效问题
 - **相似度过滤**：低质量检索结果按阈值自动过滤
 - **数据不出域**：支持 Ollama 本地大模型部署，全程无需联网调用外部 API
@@ -102,6 +103,21 @@ git clone https://www.modelscope.cn/models/BAAI/bge-reranker-base.git <本地目
 # 未配置模型时自动降级为启发式精排（heuristic），服务不中断
 ```
 
+### 文档增强（v0.5，默认开启）
+
+PDF 解析默认启用版面分析 + 表格识别 + 图片 OCR（PyMuPDF + RapidOCR，均为本地推理）：
+
+```yaml
+# document 配置段
+heading_min_size: 13.0        # 字号 ≥ 13pt 的文本块判定为标题
+table_to_markdown: true       # 表格识别并转 Markdown 入库（含 bbox）
+ocr_enabled: true             # 内嵌图片 OCR，结果带所在章节标题上下文
+ocr_max_images_per_page: 3    # 每页最多 OCR 3 张图（控制耗时）
+ocr_min_area: 8000            # 小于该面积的图片跳过（过滤小图标）
+```
+
+每个 PDF 块携带 `block_type`（heading/body/table/ocr）与 `bbox` 元数据，可支撑前端定位高亮。OCR 依赖 `rapidocr_onnxruntime`（模型随包分发，无需联网下载）。
+
 ## 项目结构
 
 ```
@@ -143,6 +159,7 @@ qiye-zhiku/
 | 2026-08-03 | v0.3 | Query 改写（追问补全）+ BM25 中文分词 + 相似度阈值过滤 + 单元测试 |
 | 2026-08-03 | v0.3.1 | 本地全链路验证：qwen2.5:7b 导入 Ollama，文档上传→混合检索→LLM 回答→多轮追问改写全流程实测通过 |
 | 2026-08-04 | v0.4 | 检索重排：bge-reranker-base cross-encoder 语义精排 + 启发式降级 + Reranker 单元测试 |
+| 2026-08-04 | v0.5 | 文档增强：PDF 版面分析（标题/正文按字号识别+bbox）+ 表格转 Markdown + 图片 OCR（RapidOCR，带章节上下文），解析器单元测试 13 项 |
 | ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景
