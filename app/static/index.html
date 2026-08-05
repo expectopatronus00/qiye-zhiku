@@ -7,12 +7,22 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="app">
+    <div class="app" id="app-main" style="display:none;">
         <!-- 侧边栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
                 <h1>企业智库</h1>
-                <span class="version">v0.2</span>
+                <span class="version">v0.7</span>
+            </div>
+
+            <!-- 用户信息 -->
+            <div class="user-box" id="user-box">
+                <div class="user-avatar" id="user-avatar">管</div>
+                <div class="user-info">
+                    <span class="user-name" id="user-name">管理员</span>
+                    <span class="user-role" id="user-role">admin</span>
+                </div>
+                <button class="btn-logout" onclick="logout()" title="退出登录">退出</button>
             </div>
 
             <!-- 对话列表 -->
@@ -31,7 +41,10 @@
                 <select id="collection-select" class="select-input">
                     <option value="default">默认知识库</option>
                 </select>
-                <button onclick="createCollection()" class="btn btn-small">+ 新建知识库</button>
+                <div class="kb-actions">
+                    <button onclick="createCollection()" class="btn btn-small">+ 新建</button>
+                    <button onclick="deleteCollection()" class="btn btn-small btn-danger" title="删除当前知识库（属主/管理员）">删除</button>
+                </div>
             </div>
 
             <div class="sidebar-section">
@@ -59,6 +72,8 @@
                     <input type="checkbox" id="rag-toggle" checked>
                     <span>RAG 模式</span>
                 </label>
+                <button class="btn btn-small btn-admin" id="btn-audit" style="display:none;"
+                        onclick="openAuditPanel()">审计日志</button>
             </div>
         </aside>
 
@@ -87,6 +102,73 @@
                 </button>
             </div>
         </main>
+    </div>
+
+    <!-- 登录遮罩 -->
+    <div class="auth-overlay" id="auth-overlay">
+        <div class="auth-card">
+            <h2>企业智库</h2>
+            <p class="auth-sub">私有化 RAG 知识问答系统</p>
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">登录</button>
+            </div>
+            <form id="login-form" onsubmit="event.preventDefault(); doLogin();">
+                <input type="text" id="login-username" placeholder="用户名" autocomplete="username" required>
+                <input type="password" id="login-password" placeholder="密码" autocomplete="current-password" required>
+                <button type="submit" class="btn btn-primary btn-block">登 录</button>
+            </form>
+            <p class="auth-error" id="auth-error"></p>
+            <p class="auth-hint">新用户由管理员创建账号<br>初始管理员密码见服务端 data/admin_credentials.txt</p>
+        </div>
+    </div>
+
+    <!-- 审计日志面板 -->
+    <div class="modal-overlay" id="audit-modal" style="display:none;" onclick="if(event.target===this)closeAuditPanel()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>操作审计日志</h3>
+                <button class="modal-close" onclick="closeAuditPanel()">&times;</button>
+            </div>
+            <div class="modal-filters">
+                <input type="text" id="audit-user-filter" placeholder="按用户过滤" class="filter-input">
+                <select id="audit-action-filter" class="filter-input">
+                    <option value="">全部动作</option>
+                    <option value="auth.login">登录</option>
+                    <option value="auth.login_failed">登录失败</option>
+                    <option value="auth.logout">登出</option>
+                    <option value="auth.change_password">修改密码</option>
+                    <option value="user.register">用户注册</option>
+                    <option value="kb.create">创建知识库</option>
+                    <option value="kb.delete">删除知识库</option>
+                    <option value="document.upload">上传文档</option>
+                    <option value="chat.completion">问答</option>
+                    <option value="chat.stream">流式问答</option>
+                    <option value="system.startup">系统启动</option>
+                </select>
+                <button class="btn btn-small" onclick="loadAudit(1)">查询</button>
+            </div>
+            <div class="modal-body">
+                <table class="audit-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>用户</th>
+                            <th>动作</th>
+                            <th>对象</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody id="audit-tbody">
+                        <tr><td colspan="5" class="audit-empty">加载中...</td></tr>
+                    </tbody>
+                </table>
+                <div class="modal-pager">
+                    <button class="btn btn-small" id="audit-prev" onclick="loadAudit(auditPage-1)">上一页</button>
+                    <span id="audit-page-info"></span>
+                    <button class="btn btn-small" id="audit-next" onclick="loadAudit(auditPage+1)">下一页</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/app.js"></script>

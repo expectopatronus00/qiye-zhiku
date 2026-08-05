@@ -30,3 +30,7 @@ config.yaml
 
 *.log.err
 server.log*
+
+# Runtime artifacts
+e2e_result.txt
+.trash_dev/

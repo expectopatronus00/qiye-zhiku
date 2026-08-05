@@ -124,3 +124,18 @@ data:
   uploads: "./data/uploads"
   vectorstore: "./data/vectorstore"
   logs: "./data/logs"
+
+# 安全与权限配置 (v0.7)
+security:
+  # 是否启用认证（false 则所有接口免登录，内网直连模式）
+  auth_enabled: true
+  # 登录令牌有效期（小时）
+  token_expire_hours: 24
+  # 用户/知识库归属/审计日志 SQLite 路径
+  db_path: "./data/security.db"
+  # 管理员用户名
+  admin_username: "admin"
+  # 管理员密码（空则首次启动生成随机密码写入 data/admin_credentials.txt）
+  admin_password: ""
+  # 连续失败锁定次数（0 表示不锁定）
+  max_login_attempts: 5

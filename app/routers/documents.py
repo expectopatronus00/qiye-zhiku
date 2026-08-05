@@ -1,13 +1,20 @@
-"""文档管理 API 路由"""
+"""文档管理 API 路由 (v0.7 接入知识库权限)"""
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.document import DocumentParser, TextSplitter
 from app.core.embeddings import EmbeddingService
 from app.core.vectorstore import VectorStore
+from app.core.security import (
+    User,
+    get_audit_logger,
+    get_current_user,
+    get_kb_registry,
+    require_kb_access,
+)
 
 router = APIRouter()
 
@@ -31,8 +38,12 @@ class DocumentListResponse(BaseModel):
 async def upload_document(
     file: UploadFile = File(...),
     collection_name: str = Form("default"),
+    user: User = Depends(get_current_user),
 ):
-    """上传并解析文档，生成向量存入知识库"""
+    """上传并解析文档，生成向量存入知识库（需知识库访问权限）"""
+    # 权限校验
+    require_kb_access(collection_name, user)
+
     # 检查文件类型
     ext = Path(file.filename).suffix.lower()
     if ext not in settings.document.allowed_extensions:
@@ -83,6 +94,9 @@ async def upload_document(
             metadatas=metadatas,
         )
 
+        get_audit_logger().log(user.username, "document.upload", collection_name,
+                               f"上传 {file.filename}，共 {len(sub_chunks)} 块")
+
         return DocumentUploadResponse(
             filename=file.filename,
             chunks_count=len(sub_chunks),
@@ -98,8 +112,12 @@ async def upload_document(
 
 
 @router.get("/list/{collection_name}", response_model=DocumentListResponse)
-async def list_documents(collection_name: str):
-    """列出知识库中的文档信息"""
+async def list_documents(
+    collection_name: str,
+    user: User = Depends(get_current_user),
+):
+    """列出知识库中的文档信息（需知识库访问权限）"""
+    require_kb_access(collection_name, user)
     vectorstore = VectorStore(collection_name=collection_name)
     total = vectorstore.count()
 
@@ -115,14 +133,3 @@ async def list_documents(collection_name: str):
         total_chunks=total,
         documents=filenames,
     )
-
-
-@router.delete("/collection/{collection_name}")
-async def delete_collection(collection_name: str):
-    """删除整个知识库"""
-    try:
-        vectorstore = VectorStore(collection_name=collection_name)
-        vectorstore.delete_collection()
-        return {"status": "success", "message": f"知识库 '{collection_name}' 已删除"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")

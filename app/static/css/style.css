@@ -498,3 +498,289 @@ body {
     .sidebar { display: none; }
     .message { max-width: 90%; }
 }
+
+/* ========== v0.7 认证与审计 ========== */
+
+/* 用户信息栏 */
+.user-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    margin-bottom: 16px;
+    background: var(--bg);
+    border-radius: 10px;
+}
+
+.user-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.user-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.user-name {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-role {
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 8px;
+    width: fit-content;
+    margin-top: 2px;
+}
+
+.role-admin {
+    background: rgba(234, 67, 53, 0.1);
+    color: var(--error);
+}
+
+.role-user {
+    background: rgba(26, 115, 232, 0.1);
+    color: var(--primary);
+}
+
+.btn-logout {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.btn-logout:hover {
+    border-color: var(--error);
+    color: var(--error);
+}
+
+.kb-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.btn-danger {
+    color: var(--error);
+    border-color: rgba(234, 67, 53, 0.4);
+}
+
+.btn-danger:hover {
+    background: rgba(234, 67, 53, 0.06);
+}
+
+.btn-admin {
+    border-color: rgba(234, 67, 53, 0.4);
+    color: var(--error);
+}
+
+.conv-empty {
+    color: var(--text-secondary);
+    font-size: 13px;
+    padding: 16px 8px;
+    text-align: center;
+}
+
+/* 登录遮罩 */
+.auth-overlay {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.auth-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 40px 36px;
+    width: 380px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.auth-card h2 {
+    font-size: 26px;
+    color: var(--primary);
+    text-align: center;
+    margin-bottom: 4px;
+}
+
+.auth-sub {
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.auth-card input {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    outline: none;
+}
+
+.auth-card input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
+}
+
+.btn-block {
+    width: 100%;
+    padding: 12px;
+    font-size: 15px;
+}
+
+.auth-error {
+    color: var(--error);
+    font-size: 13px;
+    min-height: 18px;
+    margin-top: 8px;
+    text-align: center;
+}
+
+.auth-hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-align: center;
+    margin-top: 16px;
+    line-height: 1.7;
+}
+
+/* 审计日志模态框 */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 900;
+}
+
+.modal-card {
+    background: #fff;
+    border-radius: 12px;
+    width: min(960px, 92vw);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+    font-size: 16px;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 22px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.modal-filters {
+    display: flex;
+    gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+}
+
+.filter-input {
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+}
+
+.filter-input:focus {
+    border-color: var(--primary);
+}
+
+.modal-body {
+    padding: 12px 20px 20px;
+    overflow-y: auto;
+}
+
+.audit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.audit-table th {
+    text-align: left;
+    padding: 8px 10px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.audit-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    word-break: break-all;
+}
+
+.audit-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px !important;
+}
+
+.modal-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding-top: 12px;
+}
+
+.modal-pager span {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.modal-pager .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}

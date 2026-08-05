@@ -1,5 +1,5 @@
-"""对话 API 路由 - v0.3 支持 Query 改写"""
-from fastapi import APIRouter, HTTPException
+"""对话 API 路由 - v0.3 支持 Query 改写, v0.7 接入认证/权限/审计"""
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.responses import StreamingResponse
@@ -8,6 +8,13 @@ from app.core.llm import LLMService
 from app.core.retriever import Retriever
 from app.core.conversation import conversation_manager
 from app.core.query_rewriter import query_rewriter
+from app.core.security import (
+    User,
+    get_audit_logger,
+    get_current_user,
+    get_kb_registry,
+    require_kb_access,
+)
 
 router = APIRouter()
 
@@ -61,39 +68,62 @@ class CreateConversationRequest(BaseModel):
 
 # ========== 对话会话管理 ==========
 
+def _visible_collections(user: User) -> set[str]:
+    """当前用户可见的知识库集合"""
+    return {kb.name for kb in get_kb_registry().list_for(user)}
+
+
 @router.get("/conversations")
-async def list_conversations():
-    """列出所有对话"""
-    return conversation_manager.list_all()
+async def list_conversations(user: User = Depends(get_current_user)):
+    """列出当前用户可见知识库下的所有对话"""
+    visible = _visible_collections(user)
+    return [
+        c for c in conversation_manager.list_all()
+        if c["collection_name"] in visible
+    ]
 
 
 @router.post("/conversations")
-async def create_conversation(req: CreateConversationRequest):
-    """创建新对话"""
+async def create_conversation(req: CreateConversationRequest,
+                              user: User = Depends(get_current_user)):
+    """创建新对话（需知识库访问权限）"""
+    require_kb_access(req.collection_name, user)
     conv = conversation_manager.create(collection_name=req.collection_name)
     return {"id": conv.id, "title": conv.title}
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str):
+async def get_conversation(conversation_id: str,
+                           user: User = Depends(get_current_user)):
     """获取对话详情（含消息历史）"""
     conv = conversation_manager.get(conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
+    require_kb_access(conv.collection_name, user)
     return conv.to_dict()
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
+async def delete_conversation(conversation_id: str,
+                              user: User = Depends(get_current_user)):
     """删除对话"""
+    conv = conversation_manager.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    require_kb_access(conv.collection_name, user)
     if conversation_manager.delete(conversation_id):
         return {"ok": True}
     raise HTTPException(status_code=404, detail="对话不存在")
 
 
 @router.post("/conversations/{conversation_id}/clear")
-async def clear_conversation(conversation_id: str):
+async def clear_conversation(conversation_id: str,
+                             user: User = Depends(get_current_user)):
     """清空对话消息"""
+    conv = conversation_manager.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    require_kb_access(conv.collection_name, user)
     if conversation_manager.clear_messages(conversation_id):
         return {"ok": True}
     raise HTTPException(status_code=404, detail="对话不存在")
@@ -178,8 +208,9 @@ def _get_or_create_conv(request: ChatRequest):
 # ========== 对话接口 ==========
 
 @router.post("/completions", response_model=ChatResponse)
-async def chat_completion(request: ChatRequest):
+async def chat_completion(request: ChatRequest, user: User = Depends(get_current_user)):
     """非流式对话接口（多轮 + Query 改写）"""
+    require_kb_access(request.collection_name, user)
     llm = LLMService()
     conv = _get_or_create_conv(request)
 
@@ -189,6 +220,9 @@ async def chat_completion(request: ChatRequest):
 
     # 记录助手回复
     conv.add_message("assistant", answer, sources=sources)
+
+    get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
+                           f"对话 {conv.id}，问题: {request.message[:80]}")
 
     return ChatResponse(
         answer=answer,
@@ -200,8 +234,9 @@ async def chat_completion(request: ChatRequest):
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, user: User = Depends(get_current_user)):
     """流式对话接口（多轮 + Query 改写）"""
+    require_kb_access(request.collection_name, user)
     llm = LLMService()
     conv = _get_or_create_conv(request)
 
@@ -216,6 +251,8 @@ async def chat_stream(request: ChatRequest):
 
         # 流结束后保存助手回复
         conv.add_message("assistant", "".join(full_response), sources=sources)
+        get_audit_logger().log(user.username, "chat.stream", conv.collection_name,
+                               f"对话 {conv.id}，问题: {request.message[:80]}")
         yield "data: [DONE]\n\n"
 
     headers = {"X-Conversation-Id": conv.id}

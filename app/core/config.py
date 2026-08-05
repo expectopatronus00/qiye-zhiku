@@ -81,6 +81,16 @@ class EvalConfig(BaseModel):
     min_context_recall: float = 0.5
 
 
+class SecurityConfig(BaseModel):
+    """安全与权限配置 (v0.7)"""
+    auth_enabled: bool = True        # 关闭后所有接口免登录（内网直连模式）
+    token_expire_hours: int = 24     # 登录令牌有效期
+    db_path: str = "./data/security.db"  # 用户/知识库归属/审计日志 SQLite
+    admin_username: str = "admin"
+    admin_password: str = ""         # 空则首次启动生成随机密码并写入 data/admin_credentials.txt
+    max_login_attempts: int = 5      # 连续失败锁定次数（0 表示不锁定）
+
+
 class DataConfig(BaseModel):
     uploads: str = "./data/uploads"
     vectorstore: str = "./data/vectorstore"
@@ -98,6 +108,7 @@ class Settings(BaseModel):
     query_rewrite: QueryRewriteConfig = QueryRewriteConfig()
     reranker: RerankerConfig = RerankerConfig()
     eval: EvalConfig = EvalConfig()
+    security: SecurityConfig = SecurityConfig()
     data: DataConfig = DataConfig()
 
 
