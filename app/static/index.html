@@ -5,14 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>企业智库 - RAG 知识问答系统</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        // 主题初始化（防闪烁）：URL ?theme= > localStorage > 系统偏好 > 深色
+        (function () {
+            var q = new URLSearchParams(location.search).get('theme');
+            var t = q || localStorage.getItem('qz_theme');
+            if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body>
     <div class="app" id="app-main" style="display:none;">
         <!-- 侧边栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
+                <div class="logo-badge">智</div>
                 <h1>企业智库</h1>
-                <span class="version">v0.7</span>
+                <span class="version">v0.8</span>
             </div>
 
             <!-- 用户信息 -->
@@ -53,8 +63,9 @@
                     <input type="file" id="file-input" multiple
                            accept=".pdf,.docx,.xlsx,.md,.txt,.csv"
                            onchange="uploadFiles()">
-                    <p>拖拽文件到此处<br>或点击上传</p>
-                    <span class="hint">支持 PDF / Word / Excel / Markdown / TXT</span>
+                    <div class="upload-icon">⇪</div>
+                    <p>拖拽文件到此处或点击上传</p>
+                    <span class="hint">PDF / Word / Excel / Markdown / TXT</span>
                 </div>
                 <div id="upload-status"></div>
             </div>
@@ -69,37 +80,57 @@
 
             <div class="sidebar-footer">
                 <label class="toggle">
+                    <span>RAG 检索增强</span>
                     <input type="checkbox" id="rag-toggle" checked>
-                    <span>RAG 模式</span>
                 </label>
-                <button class="btn btn-small btn-admin" id="btn-audit" style="display:none;"
-                        onclick="openAuditPanel()">审计日志</button>
+                <div class="footer-actions">
+                    <button class="btn btn-small" onclick="openAuditPanel()" id="btn-audit" style="display:none;">审计日志</button>
+                    <button class="btn btn-small" id="btn-theme" onclick="toggleTheme()" title="切换主题">
+                        <span id="theme-icon">☀</span>
+                    </button>
+                </div>
             </div>
         </aside>
 
         <!-- 主对话区 -->
         <main class="chat-area">
             <div class="chat-header">
-                <h2>智能问答</h2>
-                <span class="model-info" id="model-info">qwen2.5:7b</span>
+                <div class="chat-header-left">
+                    <h2 id="chat-title">智能问答</h2>
+                    <span class="model-info" id="model-info">qwen2.5:7b</span>
+                </div>
+                <div class="chat-header-actions">
+                    <button class="btn-export" onclick="exportConversation()" title="导出当前对话为 Markdown">导出</button>
+                </div>
             </div>
 
             <div class="chat-messages" id="chat-messages">
-                <div class="welcome-message">
-                    <h3>企业智库</h3>
-                    <p>上传文档到知识库，然后开始提问。</p>
-                    <p>支持多轮对话，上下文自动关联。</p>
+                <div class="chat-messages-inner">
+                    <div class="welcome-message">
+                        <div class="welcome-logo">智</div>
+                        <h3>企业智库</h3>
+                        <p>上传文档到知识库，然后开始提问。</p>
+                        <p>支持多轮对话 · 来源溯源 · 上下文自动关联</p>
+                        <div class="welcome-suggestions">
+                            <button class="suggestion-chip" onclick="quickAsk('知识库里有哪些文档？')">知识库里有哪些文档？</button>
+                            <button class="suggestion-chip" onclick="quickAsk('总结一下文档的核心内容')">总结一下文档的核心内容</button>
+                            <button class="suggestion-chip" onclick="quickAsk('文档中的告警阈值是多少？')">文档中的告警阈值是多少？</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <div class="chat-input-area">
-                <textarea id="chat-input" placeholder="输入你的问题..." rows="1"
-                          onkeydown="handleKeyDown(event)"></textarea>
-                <button id="send-btn" onclick="sendMessage()">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-                    </svg>
-                </button>
+                <div class="input-shell">
+                    <textarea id="chat-input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行..." rows="1"
+                              onkeydown="handleKeyDown(event)"></textarea>
+                    <button id="send-btn" onclick="sendMessage()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-hint">回答内容来自知识库检索结果，可点击 [n] 引用或来源卡片查看原文</div>
             </div>
         </main>
     </div>
@@ -107,11 +138,9 @@
     <!-- 登录遮罩 -->
     <div class="auth-overlay" id="auth-overlay">
         <div class="auth-card">
+            <div class="auth-logo">智</div>
             <h2>企业智库</h2>
             <p class="auth-sub">私有化 RAG 知识问答系统</p>
-            <div class="auth-tabs">
-                <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">登录</button>
-            </div>
             <form id="login-form" onsubmit="event.preventDefault(); doLogin();">
                 <input type="text" id="login-username" placeholder="用户名" autocomplete="username" required>
                 <input type="password" id="login-password" placeholder="密码" autocomplete="current-password" required>
@@ -167,6 +196,20 @@
                     <span id="audit-page-info"></span>
                     <button class="btn btn-small" id="audit-next" onclick="loadAudit(auditPage+1)">下一页</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文档预览面板 -->
+    <div class="modal-overlay" id="preview-modal" style="display:none;" onclick="if(event.target===this)closePreview()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>文档预览</h3>
+                <button class="modal-close" onclick="closePreview()">&times;</button>
+            </div>
+            <div class="preview-file-meta" id="preview-meta"></div>
+            <div class="preview-content" id="preview-content">
+                <p class="audit-empty">加载中...</p>
             </div>
         </div>
     </div>

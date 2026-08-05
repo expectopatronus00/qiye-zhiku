@@ -266,3 +266,31 @@ class TestDependencies:
         with pytest.raises(HTTPException) as exc:
             require_kb_access("kb_p", _mkuser(username="bob"))
         assert exc.value.status_code == 403
+
+    def test_auth_status_endpoint(self, monkeypatch):
+        """公开状态端点：前端据此决定登录页 or 免登录直入（内网模式）"""
+        from app.core.config import settings
+        from app.routers.auth import auth_status
+        import asyncio
+
+        monkeypatch.setattr(settings.security, "auth_enabled", True)
+        assert asyncio.run(auth_status()) == {"auth_enabled": True}
+        monkeypatch.setattr(settings.security, "auth_enabled", False)
+        assert asyncio.run(auth_status()) == {"auth_enabled": False}
+
+    def test_bootstrap_reuses_credentials_file(self, db: _DB, monkeypatch, tmp_path):
+        """库为空但凭据文件存在时，沿用文件密码，避免文件与 DB 失配"""
+        from app.core.security import UserManager, verify_password
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "admin_credentials.txt").write_text(
+            "管理员账号: admin\n初始密码: KeepThisPass1\n", encoding="utf-8")
+
+        mgr = UserManager(db)
+        pw = mgr.bootstrap_admin()
+        assert pw == "KeepThisPass1"
+        row = db.query_one("SELECT pass_hash FROM users WHERE username='admin'")
+        assert row and verify_password("KeepThisPass1", row["pass_hash"])
+        # 已存在时不再重复创建
+        assert mgr.bootstrap_admin() == ""

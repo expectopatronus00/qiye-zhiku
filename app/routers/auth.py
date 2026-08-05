@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.security import (
     User,
     _bearer,
@@ -14,6 +15,12 @@ from app.core.security import (
 )
 
 router = APIRouter()
+
+
+@router.get("/status")
+async def auth_status():
+    """认证状态（公开端点）：前端据此决定显示登录页或免登录直入（内网模式）"""
+    return {"auth_enabled": settings.security.auth_enabled}
 
 
 class RegisterRequest(BaseModel):

@@ -142,6 +142,7 @@ async def _prepare_rag_messages(
     """
     # 记录用户消息（先存历史，供 Query 改写参考）
     conv.add_message("user", request.message)
+    conversation_manager.save(conv)
 
     # 获取历史（不含刚添加的当前消息）
     history = conv.get_history(max_turns=5)[:-1]
@@ -220,6 +221,7 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
 
     # 记录助手回复
     conv.add_message("assistant", answer, sources=sources)
+    conversation_manager.save(conv)
 
     get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
                            f"对话 {conv.id}，问题: {request.message[:80]}")
@@ -251,6 +253,7 @@ async def chat_stream(request: ChatRequest, user: User = Depends(get_current_use
 
         # 流结束后保存助手回复
         conv.add_message("assistant", "".join(full_response), sources=sources)
+        conversation_manager.save(conv)
         get_audit_logger().log(user.username, "chat.stream", conv.collection_name,
                                f"对话 {conv.id}，问题: {request.message[:80]}")
         yield "data: [DONE]\n\n"

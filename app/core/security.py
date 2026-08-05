@@ -150,14 +150,24 @@ class UserManager:
         self.max_attempts = settings.security.max_login_attempts
 
     def bootstrap_admin(self) -> str:
-        """确保管理员存在；返回管理员初始密码"""
+        """确保管理员存在；返回管理员初始密码
+
+        管理员已存在时直接返回；库为空且已有凭据文件时沿用文件密码，
+        保证文件与 DB 永远一致（避免环境重置后密码失配）。
+        """
         existing = self.db.query_one("SELECT pass_hash FROM users WHERE username=?", (self.admin_username,))
         if existing:
             return settings.security.admin_password or ""
         password = settings.security.admin_password
+        cred_path = Path("./data/admin_credentials.txt")
+        if not password and cred_path.exists():
+            # 复用已有凭据文件中的密码（迁移/重置场景保持连续性）
+            for line in cred_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("初始密码"):
+                    password = line.split(":", 1)[1].strip()
+                    break
         if not password:
             password = secrets.token_urlsafe(9)  # 12 位随机密码
-            cred_path = Path("./data/admin_credentials.txt")
             cred_path.parent.mkdir(parents=True, exist_ok=True)
             cred_path.write_text(
                 f"管理员账号: {self.admin_username}\n初始密码: {password}\n"

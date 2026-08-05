@@ -128,6 +128,10 @@ class ConversationManager:
             return True
         return False
 
+    def save(self, conv: Conversation) -> None:
+        """持久化单个对话（新增消息后调用，防止重启丢消息）"""
+        self._save(conv)
+
     def _save(self, conv: Conversation):
         """持久化单个对话"""
         file = self._data_dir / f"{conv.id}.json"

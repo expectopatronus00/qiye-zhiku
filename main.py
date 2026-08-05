@@ -13,7 +13,7 @@ from app.routers import auth, audit, chat, documents, knowledge
 app = FastAPI(
     title="企业智库 RAG 问答系统",
     description="面向央企 AI 场景的私有化知识库问答引擎",
-    version="0.7.0",
+    version="0.8.0",
 )
 
 # 注册路由

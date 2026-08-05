@@ -133,3 +133,46 @@ async def list_documents(
         total_chunks=total,
         documents=filenames,
     )
+
+
+@router.get("/preview/{collection_name}/{filename}")
+async def preview_document(
+    collection_name: str,
+    filename: str,
+    user: User = Depends(get_current_user),
+):
+    """预览文档内容：返回该文档在知识库中的全部文本块（需知识库访问权限）"""
+    require_kb_access(collection_name, user)
+    vectorstore = VectorStore(collection_name=collection_name)
+
+    try:
+        # 按 filename 过滤查询全部块
+        result = vectorstore.collection.get(
+            where={"filename": filename},
+            include=["documents", "metadatas"],
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"文档 '{filename}' 不存在")
+
+    ids = result.get("ids") or []
+    docs = result.get("documents") or []
+    metas = result.get("metadatas") or []
+    if not ids:
+        raise HTTPException(status_code=404, detail=f"文档 '{filename}' 不存在")
+
+    # 按 id 中的序号排序（{file_id}_{index}），保证原文顺序
+    def _sort_key(id_: str) -> int:
+        try:
+            return int(id_.rsplit("_", 1)[1])
+        except (ValueError, IndexError):
+            return 0
+
+    pairs = sorted(zip(ids, docs, metas), key=lambda x: _sort_key(x[0]))
+    chunks = [
+        {
+            "type": (meta or {}).get("block_type", "text"),
+            "content": doc[:2000],  # 单块截断，防止超长
+        }
+        for _, doc, meta in pairs
+    ]
+    return {"filename": filename, "chunks_count": len(chunks), "chunks": chunks}
