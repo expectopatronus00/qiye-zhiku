@@ -1,0 +1,47 @@
+{
+  "name": "服务器硬件监控方案",
+  "description": "基于 tests/test_docs/layout_test.pdf（表格/OCR图片/正文混合版式）的黄金评测集",
+  "collection": "default",
+  "items": [
+    {
+      "question": "CPU温度的正常区间和告警阈值分别是多少？",
+      "golden_answer": "CPU温度的正常区间是40-70℃，告警阈值是大于85℃，告警级别为严重。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "GPU监控截图里显示利用率是多少？",
+      "golden_answer": "GPU监控截图显示RTX 4070 SUPER的利用率是85%，功耗为220W。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "告警后如何通知值班人员？",
+      "golden_answer": "告警触发后由监控平台调用企业微信机器人接口推送消息，10分钟内未确认则升级为短信通知。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "系统对服务器进行什么频率的监控？",
+      "golden_answer": "本方案对数据中心服务器进行7x24小时监控。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "监控重点关注哪些指标？",
+      "golden_answer": "重点关注CPU温度、GPU利用率与内存占用三个指标。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "内存占用的正常区间和告警阈值是多少？",
+      "golden_answer": "内存占用正常区间为低于70%，告警阈值为大于85%，告警级别为警告。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "磁盘IO的告警阈值是多少？",
+      "golden_answer": "磁盘IO告警阈值为大于80%，正常区间为低于60%，告警级别为提示。",
+      "source_doc": "layout_test.pdf"
+    },
+    {
+      "question": "GPU利用率超过多少会触发告警？",
+      "golden_answer": "GPU利用率超过90%时触发告警，告警级别为警告，并通过企业微信通知值班人员。",
+      "source_doc": "layout_test.pdf"
+    }
+  ]
+}

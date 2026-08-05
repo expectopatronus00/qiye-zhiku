@@ -389,9 +389,19 @@ class TextSplitter:
         self.chunk_overlap = chunk_overlap
 
     def split(self, chunks: list[DocumentChunk]) -> list[DocumentChunk]:
-        """将文档块进一步切分为更小的块"""
+        """将文档块进一步切分为更小的块
+
+        v0.6.1: 表格块（block_type=table）保持原子性，不参与切分，
+        避免表格被拦腰截断导致检索结果缺失整行数据。
+        """
         result = []
         for chunk in chunks:
+            if chunk.metadata.get("block_type") == "table":
+                result.append(DocumentChunk(
+                    content=chunk.content,
+                    metadata={**chunk.metadata, "chunk_index": 0},
+                ))
+                continue
             sub_chunks = self._split_text(chunk.content)
             for i, sub_text in enumerate(sub_chunks):
                 result.append(DocumentChunk(

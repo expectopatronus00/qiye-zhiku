@@ -133,3 +133,14 @@ class TestFallback:
         for c in sub:
             assert c.metadata.get("block_type") in ("heading", "body", "table", "ocr")
             assert c.metadata.get("page") == 1
+
+    def test_table_block_stays_atomic(self, parsed):
+        """v0.6.1: 表格块不参与切分，避免表格被拦腰截断丢失整行数据"""
+        table = [c for c in parsed if c.metadata.get("block_type") == "table"]
+        assert table, "解析结果应包含表格块"
+        splitter = TextSplitter(chunk_size=50, chunk_overlap=10)  # 极小分块强制触发切分
+        sub = splitter.split(parsed)
+        table_sub = [c for c in sub if c.metadata.get("block_type") == "table"]
+        assert len(table_sub) == 1, "表格块应保持为单个块"
+        assert "磁盘IO" in table_sub[0].content, "表格块应包含完整表格数据（含最后一行）"
+        assert table_sub[0].content == table[0].content

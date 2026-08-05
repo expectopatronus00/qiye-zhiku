@@ -67,6 +67,20 @@ class RerankerConfig(BaseModel):
     top_n: int = 5
 
 
+class EvalConfig(BaseModel):
+    """评估体系配置 (v0.6)"""
+    enabled: bool = True
+    judge_model: str = ""            # 裁判模型，空则复用 llm.model（本地 qwen2.5:7b）
+    judge_temperature: float = 0.0   # 裁判判定温度（0 保证判定一致性）
+    num_generated_questions: int = 3 # 答案相关性评估时生成的问题数
+    max_context_chars: int = 4000    # 每次裁判判定送入的最大上下文长度
+    report_directory: str = "./data/eval_reports"
+    # 质量门禁阈值（低于任一指标则评估失败，退出码 1，供 CI 使用）
+    min_faithfulness: float = 0.5
+    min_answer_relevancy: float = 0.4
+    min_context_recall: float = 0.5
+
+
 class DataConfig(BaseModel):
     uploads: str = "./data/uploads"
     vectorstore: str = "./data/vectorstore"
@@ -83,6 +97,7 @@ class Settings(BaseModel):
     retrieval: RetrievalConfig = RetrievalConfig()
     query_rewrite: QueryRewriteConfig = QueryRewriteConfig()
     reranker: RerankerConfig = RerankerConfig()
+    eval: EvalConfig = EvalConfig()
     data: DataConfig = DataConfig()
 
 

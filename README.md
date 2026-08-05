@@ -118,6 +118,33 @@ ocr_min_area: 8000            # 小于该面积的图片跳过（过滤小图标
 
 每个 PDF 块携带 `block_type`（heading/body/table/ocr）与 `bbox` 元数据，可支撑前端定位高亮。OCR 依赖 `rapidocr_onnxruntime`（模型随包分发，无需联网下载）。
 
+### 质量评估（v0.6，可选）
+
+内置 RAGAS 方法论的三大指标评估，裁判与嵌入全程使用本地模型（默认 qwen2.5:7b + nomic-embed-text），数据不出域：
+
+| 指标 | 含义 | 评估方式 |
+|------|------|----------|
+| 忠实度 faithfulness | 回答是否忠于检索到的资料 | 回答拆陈述 → 逐条判定是否有上下文依据 |
+| 答案相关性 answer_relevancy | 回答是否切题 | 由回答反向生成问题 → 与原问题向量相似度 |
+| 上下文召回率 context_recall | 检索是否覆盖黄金答案 | 黄金答案拆陈述 → 逐条判定是否在检索结果中 |
+
+```bash
+# 构建黄金评测集 eval/dataset.json（含问题 + 黄金答案 + 来源文档）
+# 运行评估（检索 → 回答 → 三项指标 → 汇总报告）
+python scripts/run_eval.py
+
+# 快速验证前 3 题 / 指定知识库 / 覆盖门禁阈值
+python scripts/run_eval.py --limit 3
+python scripts/run_eval.py --collection my_kb
+python scripts/run_eval.py --min-faithfulness 0.6
+```
+
+- 报告输出至 `data/eval_reports/report_<时间戳>.json`，含每题得分与判定明细（便于定位失败环节）
+- **质量门禁**：任一指标低于 `config.yaml` 中 `eval.min_*` 阈值时退出码为 1，可直接接入 CI
+- 裁判输出要求 JSON，解析失败自动降级文本规则解析，仍无法判定时跳过该条（不计入分母），评估流程不中断
+- **数值字面预检**：陈述含数值事实（阈值/区间/功率等）时先做确定性字面校验（自动统一 "大于85℃"/">85C" 等表述），命中即判"是"——比 7B 裁判对多行表格的判定更稳定；语义事实仍由 LLM 裁判
+- 已知局限：7B 裁判对个别语义事实（如表格"级别"列）仍有漏判，报告含逐条判定明细，可人工审计
+
 ## 项目结构
 
 ```
@@ -133,6 +160,7 @@ qiye-zhiku/
 │   │   ├── conversation.py # 对话历史管理
 │   │   ├── document.py     # 文档处理
 │   │   ├── embeddings.py   # 向量嵌入
+│   │   ├── evaluator.py    # RAGAS 评估（忠实度/相关性/召回率，本地裁判）
 │   │   ├── llm.py          # LLM 调用
 │   │   ├── reranker.py     # 检索结果重排序（cross-encoder / 启发式）
 │   │   ├── retriever.py    # 检索引擎
@@ -160,6 +188,7 @@ qiye-zhiku/
 | 2026-08-03 | v0.3.1 | 本地全链路验证：qwen2.5:7b 导入 Ollama，文档上传→混合检索→LLM 回答→多轮追问改写全流程实测通过 |
 | 2026-08-04 | v0.4 | 检索重排：bge-reranker-base cross-encoder 语义精排 + 启发式降级 + Reranker 单元测试 |
 | 2026-08-04 | v0.5 | 文档增强：PDF 版面分析（标题/正文按字号识别+bbox）+ 表格转 Markdown + 图片 OCR（RapidOCR，带章节上下文），解析器单元测试 13 项 |
+| 2026-08-05 | v0.6 | 评估体系：RAGAS 方法论三大指标（忠实度/答案相关性/上下文召回率），本地裁判（qwen2.5:7b，温度 0）全离线评估 + 黄金评测集 + 质量门禁（可接 CI）+ 数值字面预检（归一化+确定性校验，忠实度 0.81→1.00、召回率 0.85→0.96），评估器单元测试 29 项 |
 | ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景

@@ -28,6 +28,7 @@ pydantic-settings==2.5.2
 aiofiles==24.1.0
 rank-bm25==0.2.2
 jieba==0.42.1
+numpy>=1.26   # 评估器向量相似度 (v0.6)
 
 # Testing
 pytest==8.3.2

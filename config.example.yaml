@@ -100,6 +100,25 @@ reranker:
   # 精排后返回的条数
   top_n: 5
 
+# 评估体系配置 (v0.6, 可选)
+eval:
+  # 是否启用评估（运行 scripts/run_eval.py 时生效）
+  enabled: true
+  # 裁判模型，空则复用 llm.model（评估全程本地完成，数据不出域）
+  judge_model: ""
+  # 裁判判定温度（0 保证判定一致性）
+  judge_temperature: 0.0
+  # 答案相关性评估时生成的问题数
+  num_generated_questions: 3
+  # 每次裁判判定送入的最大上下文长度
+  max_context_chars: 4000
+  # 评估报告输出目录
+  report_directory: "./data/eval_reports"
+  # 质量门禁阈值（低于任一指标则评估失败，退出码 1，供 CI 使用）
+  min_faithfulness: 0.5
+  min_answer_relevancy: 0.4
+  min_context_recall: 0.5
+
 # 数据目录
 data:
   uploads: "./data/uploads"
