@@ -322,7 +322,7 @@ async function switchConversation(conversationId) {
             if (msg.role === 'user') {
                 appendUserMessage(msg.content);
             } else if (msg.role === 'assistant') {
-                appendAssistantMessage(msg.content, msg.sources || [], msg.tool_steps || []);
+                appendAssistantMessage(msg.content, msg.sources || [], msg.tool_steps || [], null, msg.id || '', msg.retrieval_debug || null);
             }
         });
     } catch (err) {
@@ -620,7 +620,7 @@ function appendUserMessage(content) {
     return div;
 }
 
-function appendAssistantMessage(content, sources, toolSteps, agentInfo) {
+function appendAssistantMessage(content, sources, toolSteps, agentInfo, messageId, retrievalDebug) {
     const inner = getMessagesContainer();
     const welcome = inner.querySelector('.welcome-message');
     if (welcome) welcome.remove();
@@ -730,9 +730,136 @@ function appendAssistantMessage(content, sources, toolSteps, agentInfo) {
         div.appendChild(cards);
     }
 
+    // 检索详情折叠面板（v1.2：召回路径/融合分/耗时诊断）
+    if (retrievalDebug && (retrievalDebug.hybrid !== undefined || retrievalDebug.paths)) {
+        const dbg = document.createElement('div');
+        dbg.className = 'retrieval-debug';
+        const dHeader = document.createElement('div');
+        dHeader.className = 'retrieval-debug-header';
+        const fusionLabel = retrievalDebug.hybrid
+            ? `混合检索 · ${escapeHtml(retrievalDebug.fusion || 'rrf')} · BM25权重 ${retrievalDebug.bm25_weight}`
+            : `向量检索 · ${escapeHtml(retrievalDebug.fusion || '')}`;
+        dHeader.innerHTML = `
+            <span class="retrieval-debug-icon">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            </span>
+            <span>检索详情 · ${fusionLabel} · 向量${retrievalDebug.vector_hits ?? 0}路/BM25 ${retrievalDebug.bm25_hits ?? 0}路 · ${retrievalDebug.elapsed_ms ?? 0}ms</span>
+            <span class="agent-steps-arrow">▾</span>`;
+        dHeader.onclick = () => dbg.classList.toggle('open');
+        const dBody = document.createElement('div');
+        dBody.className = 'retrieval-debug-body';
+        const rows = (retrievalDebug.paths || []).map(p => {
+            const vPart = p.vector_rank ? `向量 #${p.vector_rank} (${p.vector_score})` : '—';
+            const bPart = p.bm25_rank ? `BM25 #${p.bm25_rank} (${p.bm25_score})` : '—';
+            const rrf = p.rrf != null ? `<em>RRF ${p.rrf}</em>` : '';
+            return `<div class="retrieval-debug-row">
+                <span class="retrieval-debug-prefix">${escapeHtml(p.content_prefix || '')}</span>
+                <span class="retrieval-debug-path">${vPart} · ${bPart} ${rrf}</span>
+            </div>`;
+        }).join('');
+        dBody.innerHTML = rows || '<div class="retrieval-debug-row muted">无检索路径数据</div>';
+        dbg.appendChild(dHeader);
+        dbg.appendChild(dBody);
+        div.appendChild(dbg);
+    }
+
+    // 反馈操作栏（v1.2：点赞/点踩，messageId 为锚点）
+    if (messageId) {
+        const fbBar = document.createElement('div');
+        fbBar.className = 'feedback-bar';
+        fbBar.innerHTML = `
+            <span class="feedback-label">这个回答有帮助吗？</span>
+            <button class="feedback-btn feedback-up" title="回答有帮助" onclick="submitFeedback('${messageId}','up')">👍 有帮助</button>
+            <button class="feedback-btn feedback-down" title="回答不准确/缺失，可补充期望回答" onclick="submitFeedback('${messageId}','down')">👎 需改进</button>`;
+        div.appendChild(fbBar);
+    }
+
     inner.appendChild(div);
     scrollToBottom();
     return div;
+}
+
+// 提交反馈（v1.2）：点踩时弹窗补充原因与期望回答（回流评测集）
+function submitFeedback(messageId, rating) {
+    const reason = rating === 'down'
+        ? prompt('请简要说明回答哪里不准确（可选）：\n\n提示：填写"期望回答"可回流到黄金评测集，自动纳入后续回归评测。', '')
+        : '';
+    if (reason === null) return; // 取消
+    let expected = '';
+    if (rating === 'down' && reason) {
+        expected = prompt('期望的回答是什么？（可选，填写后自动回流评测集）', '');
+        if (expected === null) return;
+    }
+    apiFetch('/api/chat/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: messageId, rating, reason, expected_answer: expected }),
+    }).then(resp => {
+        if (!resp.ok) throw new Error('提交失败');
+        return resp.json();
+    }).then(() => {
+        // 标记按钮已反馈
+        document.querySelectorAll(`.feedback-btn`).forEach(b => b.disabled = true);
+        alert(rating === 'up' ? '已记录 👍 感谢反馈！' : '已记录 👎 感谢反馈，将纳入评测回归。');
+    }).catch(err => alert('反馈提交失败: ' + err.message));
+}
+
+// 管理端：用户反馈列表（v1.2）
+async function loadAdminFeedback() {
+    const tbody = document.getElementById('feedback-tbody');
+    const rating = document.getElementById('feedback-rating-filter').value;
+    try {
+        const resp = await apiFetch(`/api/admin/feedback?rating=${encodeURIComponent(rating)}&limit=200`);
+        if (!resp.ok) throw new Error('加载失败');
+        const data = await resp.json();
+        document.getElementById('feedback-count-tip').textContent = `共 ${data.total || 0} 条反馈`;
+        tbody.innerHTML = '';
+        if (!data.items || data.items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="audit-empty">暂无反馈（对话消息下方可点赞/点踩）</td></tr>';
+            return;
+        }
+        data.items.forEach(f => {
+            const tr = document.createElement('tr');
+            const badge = f.rating === 'up'
+                ? '<span class="status-badge status-on">👍 点赞</span>'
+                : '<span class="status-badge status-off">👎 点踩</span>';
+            const reason = escapeHtml(f.reason || '');
+            const expected = f.expected_answer
+                ? `<div class="feedback-expected">期望: ${escapeHtml(String(f.expected_answer).slice(0, 80))}</div>` : '';
+            tr.innerHTML = `
+                <td>${escapeHtml(f._date || f.created_at || '')}</td>
+                <td>${escapeHtml(f.username || '')}</td>
+                <td>${badge}</td>
+                <td title="${escapeHtml(f.question || '')}">${escapeHtml(String(f.question || '').slice(0, 40))}</td>
+                <td class="feedback-reason">${reason}${expected}</td>`;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="audit-empty">加载失败: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+// 管理端：导出回流评测集（v1.2）
+async function exportFeedbackDataset() {
+    try {
+        const resp = await apiFetch('/api/admin/feedback/export');
+        if (!resp.ok) throw new Error('导出失败');
+        const data = await resp.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `feedback_dataset_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        if (data.items && data.items.length > 0) {
+            alert(`已导出 ${data.items.length} 条回流评测条目。\n\n可追加到 eval/dataset.json 后运行:\npython eval/run_regression.py --collect-feedback`);
+        } else {
+            alert('暂无可用回流条目（需要"点踩 + 填写期望回答"的反馈）');
+        }
+    } catch (err) {
+        alert('导出失败: ' + err.message);
+    }
 }
 
 // 引用高亮：点击回答中的 [n] → 高亮对应来源卡片
@@ -974,7 +1101,7 @@ async function sendMessage() {
             document.getElementById('chat-title').textContent = message.slice(0, 20) + (message.length > 20 ? '...' : '');
         }
 
-        appendAssistantMessage(data.answer, data.sources || []);
+        appendAssistantMessage(data.answer, data.sources || [], [], null, data.message_id || '', data.retrieval_debug || null);
     } catch (err) {
         removeTyping(loadingId);
         if (err.message.includes('重新登录')) {
@@ -1100,12 +1227,13 @@ function switchAdminTab(tab) {
     document.querySelectorAll('.admin-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
     });
-    ['audit', 'users', 'kbs', 'config'].forEach(t => {
+    ['audit', 'users', 'kbs', 'config', 'feedback'].forEach(t => {
         document.getElementById('admin-panel-' + t).style.display = (t === tab) ? '' : 'none';
     });
     if (tab === 'users') loadAdminUsers(1);
     else if (tab === 'kbs') loadAdminKbs();
     else if (tab === 'config') loadAdminConfig();
+    else if (tab === 'feedback') loadAdminFeedback();
     else loadAudit(1);
 }
 

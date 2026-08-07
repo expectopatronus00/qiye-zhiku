@@ -1763,3 +1763,33 @@ button {
 .config-msg { font-size: 13px; margin-left: 10px; }
 .config-ok { color: #22c55e; }
 .config-err { color: #ff5b5b; }
+
+/* ========== v1.2 检索效果工程 ========== */
+
+/* 反馈操作栏 */
+.feedback-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border, rgba(255,255,255,.08)); }
+.feedback-label { font-size: 12px; color: var(--text-secondary, #8899aa); }
+.feedback-btn { padding: 3px 10px; font-size: 12px; border-radius: 12px; border: 1px solid var(--border, rgba(255,255,255,.12)); background: transparent; color: var(--text-secondary, #8899aa); cursor: pointer; transition: all .15s; }
+.feedback-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+.feedback-up:hover { border-color: #22c55e; color: #22c55e; }
+.feedback-down:hover { border-color: #f59e0b; color: #f59e0b; }
+.feedback-btn:disabled { opacity: .4; cursor: default; }
+
+/* 检索详情折叠面板 */
+.retrieval-debug { margin-top: 8px; border: 1px solid var(--border, rgba(255,255,255,.08)); border-radius: 8px; overflow: hidden; font-size: 12px; }
+.retrieval-debug-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; color: var(--text-secondary, #8899aa); background: var(--bg-soft, rgba(255,255,255,.03)); }
+.retrieval-debug-header:hover { color: var(--text-primary, #e5eaf0); }
+.retrieval-debug-icon { display: inline-flex; }
+.retrieval-debug-body { display: none; padding: 4px 0; }
+.retrieval-debug.open .retrieval-debug-body { display: block; }
+.retrieval-debug.open .agent-steps-arrow { transform: rotate(180deg); }
+.retrieval-debug-row { display: flex; gap: 10px; padding: 3px 12px; align-items: baseline; }
+.retrieval-debug-row:hover { background: var(--bg-soft, rgba(255,255,255,.03)); }
+.retrieval-debug-prefix { flex: 0 0 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary, #8899aa); }
+.retrieval-debug-path { font-size: 11px; color: #5b6b7b; }
+.retrieval-debug-path em { color: #3b82f6; font-style: normal; margin-left: 4px; }
+.retrieval-debug .muted { color: var(--text-secondary, #8899aa); padding: 4px 12px; }
+
+/* 管理端反馈列表 */
+.feedback-reason { font-size: 12px; color: var(--text-secondary, #8899aa); max-width: 340px; }
+.feedback-expected { margin-top: 2px; color: #f59e0b; }

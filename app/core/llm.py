@@ -28,6 +28,9 @@ class LLMService:
     def __init__(self):
         self.provider = settings.llm.provider
         self.model = settings.llm.model
+        self.ollama_base_url = settings.llm.ollama_base_url
+        self.openai_base_url = settings.llm.openai_base_url
+        self.openai_api_key = settings.llm.openai_api_key
 
     async def chat(self, messages: list[dict], temperature: Optional[float] = None) -> str:
         """发送对话请求，返回完整响应

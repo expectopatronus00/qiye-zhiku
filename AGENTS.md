@@ -5,7 +5,7 @@
 
 ## 项目是什么
 
-面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.1（管理后台），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.1 已完成）。
+面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.2（检索效果工程），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.2 已完成）。
 
 技术栈：Python 3.11 / FastAPI / ChromaDB / SQLite / jieba / PyMuPDF / RapidOCR / pytest。
 
@@ -36,7 +36,7 @@ app/core/          核心逻辑
   llm.py           LLM 统一接口（ollama/openai 双 provider；chat_stream SSE 流式；新 provider 在此扩展）
   embeddings.py    嵌入（ollama / openai / 本地模型路径）
   vectorstore.py   向量库（ChromaDB；list_collections/upsert/query，新后端在此扩展）
-  retriever.py     检索（向量语义 + BM25 关键词双路召回，jieba 分词）
+  retriever.py     检索（向量语义 + BM25 关键词双路召回，jieba 分词；标准 RRF 融合 k=60，last_debug 诊断数据）
   reranker.py      重排（bge-reranker-base cross-encoder，模型缺失自动降级启发式）
   query_rewriter.py 多轮追问 Query 改写（补全指代）
   agent.py         Agent 循环（工具调用多步推理，失败重试上限 6 + 超限强制总结）
@@ -44,18 +44,19 @@ app/core/          核心逻辑
   document.py      文档解析（PDF 版面按字号分标题/正文、表格转 Markdown、RapidOCR 图片 OCR）
   conversation.py  对话历史管理（上下文窗口、持久化）
   evaluator.py     RAGAS 评估（忠实度/相关性/召回率，本地裁判）
-  security.py      认证（PBKDF2 哈希、令牌 24h、失败锁定 10min）、知识库权限隔离、审计日志
+  security.py      认证（PBKDF2 哈希、令牌 24h、失败锁定 10min）、知识库权限隔离、审计日志、用户反馈 FeedbackManager（feedback 表落库 + 回流评测集）
   logging_setup.py 日志（app.log/access.log 轮转 5MB×5 + 请求中间件带 user/duration）
 app/routers/       API 层（prefix 各自带 /api）
   auth.py          认证（/api/auth）
-  chat.py          对话（/api/chat，含 POST /stream SSE 流式 + Agent 模式）
+  chat.py          对话（/api/chat，含 POST /stream SSE 流式 + Agent 模式 + POST /feedback 用户反馈）
   documents.py     文档（/api/documents，上传/列表/预览）
   knowledge.py     知识库（/api/knowledge，创建/查询/统计）
   audit.py         审计（/api/audit，仅管理员；GET /export CSV 带 BOM）
-  admin.py         管理后台（/api/admin：用户管理/知识库配额/系统配置热更新，仅管理员）
+  admin.py         管理后台（/api/admin：用户管理/知识库配额/系统配置热更新/反馈列表与回流导出，仅管理员）
   health.py        健康检查（/healthz 存活 + /readyz 就绪探测：向量库/DB/LLM 三段判定）
 app/static/index.html  前端单页（原生 JS，深色设计系统 + 浅色主题，无构建步骤）
-tests/             pytest 测试（129 项，按模块拆分 test_*.py）
+eval/run_regression.py  黄金评测集一键回归（hit@5/MRR/top1，混合 vs 纯向量，基线对比；--collect-feedback 合并回流）
+tests/             pytest 测试（145 项，按模块拆分 test_*.py）
 ```
 
 ## 常用命令
@@ -80,6 +81,9 @@ curl http://127.0.0.1:8766/healthz && curl http://127.0.0.1:8766/readyz
 8. 上传大文档是同步阻塞的（v1.2 规划异步队列），验证上传接口注意超时
 9. 管理后台 API 全部走审计日志；保护规则：不能禁用/删除 admin 账号、不能删除自己；配额校验"新值 < 已用量"返回 400
 10. config.yaml 热更新仅白名单字段（config.py ADMIN_EDITABLE），API key 在接口中遮蔽为 "****"，空字符串 key 表示保留原值
+11. LLMService 的 provider 相关 URL/key 属性必须在 __init__ 赋值（ollama_base_url 曾漏赋值导致真机问答才暴露）
+12. 反馈表在 security.db（feedback 表），消息 ID 为 conversation JSON 中 Message.id（uuid hex[:12]），管理端反馈列表走 /api/admin/feedback
+13. 回归脚本控制台中文在 GBK 终端显示乱码属正常，报告写 data/eval_reports/ 文件
 
 ## 迭代工作流（每个版本必须）
 

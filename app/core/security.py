@@ -124,6 +124,21 @@ class _DB:
                 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
                 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user);
                 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id      TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL DEFAULT '',
+                    username        TEXT NOT NULL DEFAULT '',
+                    collection_name TEXT NOT NULL DEFAULT '',
+                    question        TEXT NOT NULL DEFAULT '',
+                    answer          TEXT NOT NULL DEFAULT '',
+                    rating          TEXT NOT NULL CHECK(rating IN ('up','down')),
+                    reason          TEXT NOT NULL DEFAULT '',
+                    expected_answer TEXT NOT NULL DEFAULT '',
+                    created_at      TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
+                CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedback(rating);
                 """
             )
             # 存量库兼容迁移 (v1.1): users.enabled / knowledge_bases.quota_*
@@ -506,6 +521,83 @@ class AuditLogger:
         return {"total": total, "page": page, "size": size, "items": rows}
 
 
+# ---------------- 用户反馈 (v1.2) ----------------
+
+class FeedbackManager:
+    """用户反馈闭环：点赞/点踩落库 + 回流黄金评测集 (v1.2)
+
+    回流：点踩且填写了"期望回答"的反馈可导出为评测集条目，
+    用于迭代回归（eval/run_regression.py --collect-feedback）。
+    """
+
+    def __init__(self, db: _DB):
+        self.db = db
+
+    def add(self, message_id: str, username: str, rating: str,
+            question: str = "", answer: str = "",
+            conversation_id: str = "", collection_name: str = "",
+            reason: str = "", expected_answer: str = "") -> int:
+        """新增反馈；同一消息重复提交直接覆盖（保持最新意图）"""
+        if rating not in ("up", "down"):
+            raise ValueError("rating 必须为 up 或 down")
+        existing = self.db.query_one(
+            "SELECT id FROM feedback WHERE message_id=?", (message_id,))
+        if existing:
+            self.db.execute(
+                """UPDATE feedback SET username=?, rating=?, question=?, answer=?,
+                   conversation_id=?, collection_name=?, reason=?, expected_answer=?,
+                   created_at=? WHERE message_id=?""",
+                (username, rating, question[:500], answer[:2000],
+                 conversation_id, collection_name,
+                 reason[:500], expected_answer[:1000],
+                 time.strftime("%Y-%m-%d %H:%M:%S"), message_id))
+            return existing["id"]
+        return self.db.execute(
+            """INSERT INTO feedback (message_id, conversation_id, username,
+               collection_name, question, answer, rating, reason, expected_answer, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (message_id, conversation_id, username, collection_name,
+             question[:500], answer[:2000], rating, reason[:500],
+             expected_answer[:1000], time.strftime("%Y-%m-%d %H:%M:%S")))
+
+    def list(self, rating: Optional[str] = None, limit: int = 200,
+             offset: int = 0) -> list[dict]:
+        """反馈列表（管理端），按时间倒序"""
+        where, params = "", ()
+        if rating in ("up", "down"):
+            where, params = " WHERE rating=?", (rating,)
+        rows = self.db.query(
+            f"SELECT * FROM feedback{where} ORDER BY id DESC LIMIT ? OFFSET ?",
+            params + (limit, offset))
+        for r in rows:
+            r["rating"] = r.get("rating", "")
+            r["_date"] = r.get("created_at", "")[:16]
+        return rows
+
+    def export_dataset(self) -> dict:
+        """回流为黄金评测集（点踩 + 期望回答的反馈）"""
+        rows = self.db.query(
+            """SELECT question, expected_answer FROM feedback
+               WHERE rating='down' AND expected_answer != ''
+               ORDER BY id DESC LIMIT 500""")
+        items = [{
+            "question": r["question"],
+            "golden_answer": r["expected_answer"],
+            "source_doc": "(feedback)",
+            "origin": "user_feedback",
+        } for r in rows if r["question"]]
+        return {
+            "name": "用户反馈回流评测集",
+            "description": "由用户点踩反馈 + 期望回答回流生成，追加到黄金评测集回归",
+            "collection": "",
+            "items": items,
+        }
+
+    def count(self) -> int:
+        row = self.db.query_one("SELECT COUNT(*) AS c FROM feedback")
+        return row["c"] if row else 0
+
+
 # ---------------- 全局单例与 FastAPI 依赖 ----------------
 
 def re_valid_username(username: str) -> bool:
@@ -517,17 +609,19 @@ _security_db: Optional[_DB] = None
 _user_manager: Optional[UserManager] = None
 _kb_registry: Optional[KBRegistry] = None
 _audit_logger: Optional[AuditLogger] = None
+_feedback_manager: Optional[FeedbackManager] = None
 
 
 def _init_security() -> None:
     """延迟初始化（首次访问时），并引导管理员"""
-    global _security_db, _user_manager, _kb_registry, _audit_logger
+    global _security_db, _user_manager, _kb_registry, _audit_logger, _feedback_manager
     if _user_manager is not None:
         return
     _security_db = _DB(settings.security.db_path)
     _user_manager = UserManager(_security_db)
     _kb_registry = KBRegistry(_security_db)
     _audit_logger = AuditLogger(_security_db)
+    _feedback_manager = FeedbackManager(_security_db)
     _user_manager.bootstrap_admin()
 
 
@@ -544,6 +638,11 @@ def get_kb_registry() -> KBRegistry:
 def get_audit_logger() -> AuditLogger:
     _init_security()
     return _audit_logger
+
+
+def get_feedback_manager() -> FeedbackManager:
+    _init_security()
+    return _feedback_manager
 
 
 # FastAPI 安全依赖
@@ -581,3 +680,5 @@ def require_kb_access(name: str, user: User) -> None:
             status_code=403,
             detail=f"无权访问知识库 '{name}'（仅属主或管理员可用）",
         )
+
+

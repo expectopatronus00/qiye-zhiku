@@ -166,6 +166,7 @@
                 <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">用户管理</button>
                 <button class="admin-tab" data-tab="kbs" onclick="switchAdminTab('kbs')">知识库配额</button>
                 <button class="admin-tab" data-tab="config" onclick="switchAdminTab('config')">系统配置</button>
+                <button class="admin-tab" data-tab="feedback" onclick="switchAdminTab('feedback')">用户反馈</button>
             </div>
 
             <!-- 审计日志 tab -->
@@ -277,6 +278,32 @@
                 <div class="modal-pager">
                     <button class="btn btn-small" onclick="saveAdminConfig()">保存配置</button>
                     <span id="config-msg"></span>
+                </div>
+            </div>
+
+            <!-- 用户反馈 tab (v1.2) -->
+            <div class="admin-panel" id="admin-panel-feedback" style="display:none;">
+                <div class="modal-filters">
+                    <select id="feedback-rating-filter" class="filter-input">
+                        <option value="">全部反馈</option>
+                        <option value="up">👍 点赞</option>
+                        <option value="down">👎 点踩</option>
+                    </select>
+                    <button class="btn btn-small" onclick="loadAdminFeedback()">查询</button>
+                    <button class="btn btn-small" onclick="exportFeedbackDataset()" title="点踩且填写期望回答的反馈导出为评测集 JSON">导出评测集</button>
+                    <span class="admin-tip" id="feedback-count-tip"></span>
+                </div>
+                <div class="modal-body">
+                    <table class="audit-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th><th>用户</th><th>评分</th><th>问题</th><th>原因 / 期望回答</th>
+                            </tr>
+                        </thead>
+                        <tbody id="feedback-tbody">
+                            <tr><td colspan="5" class="audit-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

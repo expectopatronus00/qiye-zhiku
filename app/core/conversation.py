@@ -17,9 +17,11 @@ class Message:
     timestamp: float = field(default_factory=time.time)
     sources: list[dict] = field(default_factory=list)  # RAG 检索来源（仅 assistant）
     tool_steps: list[dict] = field(default_factory=list)  # Agent 工具调用步骤（v0.9）
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])  # 消息ID（v1.2 反馈锚点）
 
     def to_dict(self) -> dict:
         return {
+            "id": self.id,
             "role": self.role,
             "content": self.content,
             "timestamp": self.timestamp,
@@ -163,6 +165,7 @@ class ConversationManager:
                             timestamp=msg_data.get("timestamp", 0),
                             sources=msg_data.get("sources", []),
                             tool_steps=msg_data.get("tool_steps", []),
+                            id=msg_data.get("id", uuid.uuid4().hex[:12]),
                         )
                     )
                 self._conversations[conv.id] = conv

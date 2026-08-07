@@ -12,6 +12,7 @@ from app.core.security import (
     User,
     get_audit_logger,
     get_current_user,
+    get_feedback_manager,
     get_kb_registry,
     require_kb_access,
 )
@@ -49,6 +50,16 @@ class ChatResponse(BaseModel):
     model: str = ""
     conversation_id: str = ""
     rewritten_query: Optional[str] = None  # 改写后的查询（仅发生改写时返回）
+    message_id: str = ""  # 助手消息 ID（v1.2 反馈锚点）
+    retrieval_debug: Optional[dict] = None  # 检索诊断（v1.2 详情面板）
+
+
+class FeedbackRequest(BaseModel):
+    """用户反馈（v1.2）"""
+    message_id: str
+    rating: str  # up | down
+    reason: str = ""  # 点踩原因
+    expected_answer: str = ""  # 期望回答（点踩时建议填写，回流评测集）
 
 
 class AgentRequest(BaseModel):
@@ -142,10 +153,10 @@ async def _prepare_rag_messages(
     llm: LLMService,
     conv,
     request: ChatRequest,
-) -> tuple[list[dict], list[dict], Optional[str]]:
-    """构建 RAG 消息列表 + 来源 + 改写后查询
+) -> tuple[list[dict], list[dict], Optional[str], Optional[dict]]:
+    """构建 RAG 消息列表 + 来源 + 改写后查询 + 检索诊断
 
-    返回: (messages, sources, rewritten_query)
+    返回: (messages, sources, rewritten_query, retrieval_debug)
     """
     # 记录用户消息（先存历史，供 Query 改写参考）
     conv.add_message("user", request.message)
@@ -163,7 +174,7 @@ async def _prepare_rag_messages(
         )
 
     if request.use_rag:
-        # 检索（用改写后的查询）
+        # 检索（用改写后的查询），retriever.last_debug 带诊断数据 (v1.2)
         retriever = Retriever(collection_name=conv.collection_name)
         docs = await retriever.retrieve(rewritten_query)
 
@@ -190,7 +201,7 @@ async def _prepare_rag_messages(
         messages.extend(history)
         messages.append({"role": "user", "content": request.message})
 
-        return messages, sources, (rewritten_query if query_changed else None)
+        return messages, sources, (rewritten_query if query_changed else None), retriever.last_debug
     else:
         # 直接对话模式
         messages = [
@@ -199,7 +210,7 @@ async def _prepare_rag_messages(
         messages.extend(history)
         messages.append({"role": "user", "content": request.message})
 
-        return messages, [], None
+        return messages, [], None, None
 
 
 def _get_or_create_conv(request: ChatRequest):
@@ -217,17 +228,17 @@ def _get_or_create_conv(request: ChatRequest):
 
 @router.post("/completions", response_model=ChatResponse)
 async def chat_completion(request: ChatRequest, user: User = Depends(get_current_user)):
-    """非流式对话接口（多轮 + Query 改写）"""
+    """非流式对话接口（多轮 + Query 改写 + 检索诊断 v1.2）"""
     require_kb_access(request.collection_name, user)
     llm = LLMService()
     conv = _get_or_create_conv(request)
 
-    messages, sources, rewritten_query = await _prepare_rag_messages(llm, conv, request)
+    messages, sources, rewritten_query, retrieval_debug = await _prepare_rag_messages(llm, conv, request)
 
     answer = await llm.chat(messages)
 
     # 记录助手回复
-    conv.add_message("assistant", answer, sources=sources)
+    msg = conv.add_message("assistant", answer, sources=sources)
     conversation_manager.save(conv)
 
     get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
@@ -239,6 +250,8 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
         model=llm.model,
         conversation_id=conv.id,
         rewritten_query=rewritten_query,
+        message_id=msg.id,
+        retrieval_debug=retrieval_debug,
     )
 
 
@@ -249,7 +262,7 @@ async def chat_stream(request: ChatRequest, user: User = Depends(get_current_use
     llm = LLMService()
     conv = _get_or_create_conv(request)
 
-    messages, sources, rewritten_query = await _prepare_rag_messages(llm, conv, request)
+    messages, sources, rewritten_query, _debug = await _prepare_rag_messages(llm, conv, request)
 
     full_response = []
 
@@ -312,7 +325,7 @@ async def chat_agent(request: AgentRequest, user: User = Depends(get_current_use
             # _prepare_rag_messages 会重新记录用户消息，先移除刚加的
             if conv.messages and conv.messages[-1].role == "user":
                 conv.messages.pop()
-            messages, sources, rewritten = await _prepare_rag_messages(llm, conv, rag_request)
+            messages, sources, rewritten, _debug = await _prepare_rag_messages(llm, conv, rag_request)
             answer = await llm.chat(messages)
             result = {"answer": answer, "steps": [], "source_files": [],
                       "fallback": True, "reason": str(exc)}
@@ -339,3 +352,57 @@ async def chat_agent(request: AgentRequest, user: User = Depends(get_current_use
         "fallback": result.get("fallback", False),
         "fallback_reason": result.get("reason", ""),
     }
+
+
+# ========== 用户反馈闭环 (v1.2) ==========
+
+def _find_message(message_id: str):
+    """全库查找消息（message_id 全局唯一），返回 (conv, msg) 或 None"""
+    for conv in conversation_manager.list_all():
+        c = conversation_manager.get(conv["id"])
+        if not c:
+            continue
+        for m in c.messages:
+            if m.id == message_id:
+                return c, m
+    return None, None
+
+
+@router.post("/feedback")
+async def submit_feedback(req: FeedbackRequest,
+                          user: User = Depends(get_current_user)):
+    """提交对某条回答的反馈（点赞/点踩 + 原因 + 期望回答）"""
+    req.rating = (req.rating or "").strip().lower()
+    if req.rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="rating 必须为 up 或 down")
+    if not req.message_id:
+        raise HTTPException(status_code=400, detail="缺少 message_id")
+
+    conv, msg = _find_message(req.message_id)
+    if msg is None or msg.role != "assistant":
+        raise HTTPException(status_code=404, detail="消息不存在")
+
+    # 取该回答对应的用户问题（向前找最近一条 user 消息）
+    question = ""
+    for m in conv.messages:
+        if m.id == msg.id:
+            break
+        if m.role == "user":
+            question = m.content
+
+    fb = get_feedback_manager().add(
+        message_id=msg.id,
+        username=user.username,
+        rating=req.rating,
+        question=question,
+        answer=msg.content[:2000],
+        conversation_id=conv.id,
+        collection_name=conv.collection_name,
+        reason=req.reason,
+        expected_answer=req.expected_answer,
+    )
+    get_audit_logger().log(
+        user.username, "chat.feedback", conv.collection_name,
+        f"消息 {msg.id} {req.rating}，原因: {req.reason[:60]}",
+    )
+    return {"ok": True, "id": fb}

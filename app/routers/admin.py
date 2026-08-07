@@ -11,6 +11,7 @@ from app.core.config import get_config_view, update_config
 from app.core.security import (
     User,
     get_audit_logger,
+    get_feedback_manager,
     get_kb_registry,
     get_user_manager,
     require_admin,
@@ -222,3 +223,28 @@ async def patch_config(request: Request, admin: User = Depends(require_admin)):
     get_audit_logger().log(admin.username, "config.update", "",
                            f"更新配置节: {','.join(changed)}")
     return {"status": "success", "config": view}
+
+
+# ---------------- 用户反馈 (v1.2) ----------------
+
+@router.get("/feedback")
+async def list_feedback(
+    rating: str = "",
+    limit: int = 200,
+    admin: User = Depends(require_admin),
+):
+    """反馈列表（可按 rating 筛选）"""
+    rows = get_feedback_manager().list(
+        rating=rating if rating in ("up", "down") else None,
+        limit=min(limit, 500),
+    )
+    return {"total": get_feedback_manager().count(), "items": rows}
+
+
+@router.get("/feedback/export")
+async def export_feedback_dataset(admin: User = Depends(require_admin)):
+    """回流黄金评测集：点踩 + 期望回答的反馈 → 评测集 JSON"""
+    data = get_feedback_manager().export_dataset()
+    get_audit_logger().log(admin.username, "feedback.export", "",
+                           f"回流评测集 {len(data['items'])} 条")
+    return data
