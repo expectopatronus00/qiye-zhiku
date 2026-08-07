@@ -130,7 +130,10 @@
                         </svg>
                     </button>
                 </div>
-                <div class="input-hint">回答内容来自知识库检索结果，可点击 [n] 引用或来源卡片查看原文</div>
+                <div class="input-toolbar">
+                    <span class="agent-mode-chip" id="agent-mode-chip" title="点击切换 Agent 模式：可自主调用工具（检索/预览文档等）完成多步任务" onclick="toggleAgentMode()">⚡ Agent 模式</span>
+                    <span class="input-hint">回答内容来自知识库检索结果，可点击 [n] 引用或来源卡片查看原文</span>
+                </div>
             </div>
         </main>
     </div>

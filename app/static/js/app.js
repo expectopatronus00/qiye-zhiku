@@ -23,6 +23,20 @@ function updateThemeIcon() {
     if (icon) icon.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '☾' : '☀';
 }
 
+// ========== Agent 模式 (v0.9) ==========
+
+let agentMode = false;
+
+function toggleAgentMode() {
+    agentMode = !agentMode;
+    const chip = document.getElementById('agent-mode-chip');
+    if (chip) chip.classList.toggle('active', agentMode);
+}
+
+function isAgentMode() {
+    return agentMode;
+}
+
 // ========== 认证 ==========
 
 function getToken() {
@@ -306,7 +320,7 @@ async function switchConversation(conversationId) {
             if (msg.role === 'user') {
                 appendUserMessage(msg.content);
             } else if (msg.role === 'assistant') {
-                appendAssistantMessage(msg.content, msg.sources || []);
+                appendAssistantMessage(msg.content, msg.sources || [], msg.tool_steps || []);
             }
         });
     } catch (err) {
@@ -604,13 +618,14 @@ function appendUserMessage(content) {
     return div;
 }
 
-function appendAssistantMessage(content, sources) {
+function appendAssistantMessage(content, sources, toolSteps, agentInfo) {
     const inner = getMessagesContainer();
     const welcome = inner.querySelector('.welcome-message');
     if (welcome) welcome.remove();
 
     const div = document.createElement('div');
     div.className = 'message assistant';
+    if (agentInfo && agentInfo.fallback) div.classList.add('agent-fallback-msg');
 
     const bubble = document.createElement('div');
     bubble.className = 'message-content';
@@ -619,6 +634,74 @@ function appendAssistantMessage(content, sources) {
     const clean = content.replace(/\[来源:\s*[^\]]*\]/g, '');
     renderMarkdownBlocks(clean).forEach(el => bubble.appendChild(el));
     div.appendChild(bubble);
+
+    // Agent 模式：工具调用推理步骤（可折叠，点击展开结果）
+    if (toolSteps && toolSteps.length > 0) {
+        const stepsBox = document.createElement('div');
+        stepsBox.className = 'agent-steps';
+
+        const header = document.createElement('div');
+        header.className = 'agent-steps-header';
+        header.innerHTML = `
+            <span class="agent-steps-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </span>
+            <span>推理过程 · ${toolSteps.length} 次工具调用</span>
+            ${agentInfo && agentInfo.iterations ? `<span class="agent-iterations">${agentInfo.iterations} 轮推理</span>` : ''}
+            <span class="agent-steps-arrow">▾</span>`;
+        header.onclick = () => stepsBox.classList.toggle('open');
+
+        const body = document.createElement('div');
+        body.className = 'agent-steps-body';
+        toolSteps.forEach((step, i) => {
+            const item = document.createElement('div');
+            item.className = 'agent-step';
+            item.dataset.tool = step.tool_name || '';
+            const args = step.arguments || {};
+            const argsText = Object.keys(args).length
+                ? Object.entries(args).map(([k, v]) => {
+                    const s = String(v);
+                    return `<span class="agent-step-arg">${escapeHtml(k)}=<em>${escapeHtml(s.length > 40 ? s.slice(0, 40) + '…' : s)}</em></span>`;
+                }).join(' ')
+                : '<span class="agent-step-arg muted">无参数</span>';
+            const duration = step.duration_ms != null ? `<span class="agent-step-dur">${step.duration_ms}ms</span>` : '';
+            item.innerHTML = `
+                <div class="agent-step-head" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="agent-step-tool">${escapeHtml(step.tool_name || 'tool')}</span>
+                    <span class="agent-step-args">${argsText}</span>
+                    ${duration}
+                    <span class="agent-steps-arrow">▸</span>
+                </div>
+                <div class="agent-step-result"><pre>${escapeHtml(String(step.result || '').slice(0, 800))}</pre></div>`;
+            body.appendChild(item);
+        });
+
+        stepsBox.appendChild(header);
+        stepsBox.appendChild(body);
+        div.appendChild(stepsBox);
+    }
+
+    // 降级提示（模型不支持工具调用时）
+    if (agentInfo && agentInfo.fallback) {
+        const fb = document.createElement('div');
+        fb.className = 'agent-fallback-note';
+        fb.innerHTML = `⚠ 当前模型不支持工具调用，已自动降级为普通 RAG 回答${agentInfo.fallback_reason ? `（${escapeHtml(String(agentInfo.fallback_reason).slice(0, 80))}）` : ''}`;
+        div.appendChild(fb);
+    }
+
+    // 来源文件徽章（Agent 模式）
+    if (agentInfo && agentInfo.source_files && agentInfo.source_files.length > 0) {
+        const files = document.createElement('div');
+        files.className = 'agent-files';
+        agentInfo.source_files.forEach(f => {
+            const tag = document.createElement('span');
+            tag.className = 'agent-file-tag';
+            tag.textContent = f;
+            tag.title = '推理过程中引用的知识库文档';
+            files.appendChild(tag);
+        });
+        div.appendChild(files);
+    }
 
     // 来源卡片（编号 + 文件名 + 相关度，点击预览）
     if (sources && sources.length > 0) {
@@ -823,6 +906,40 @@ async function sendMessage() {
     const loadingId = showTyping();
 
     try {
+        // Agent 模式：走 Function Calling 工具调用链路 (v0.9)
+        if (isAgentMode()) {
+            const response = await apiFetch('/api/chat/agent', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message,
+                    collection_name: collection,
+                    conversation_id: currentConversationId,
+                }),
+            });
+
+            removeTyping(loadingId);
+
+            if (!response.ok) {
+                const error = await response.json();
+                appendAssistantMessage(`错误: ${error.detail || '请求失败'}`, []);
+                return;
+            }
+
+            const data = await response.json();
+
+            if (!currentConversationId && data.conversation_id) {
+                currentConversationId = data.conversation_id;
+                loadConversations();
+            }
+            if (data.conversation_id) {
+                document.getElementById('chat-title').textContent = message.slice(0, 20) + (message.length > 20 ? '...' : '');
+            }
+
+            appendAssistantMessage(data.answer, [], data.tool_steps || [], data);
+            return;
+        }
+
         const response = await apiFetch('/api/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

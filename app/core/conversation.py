@@ -16,6 +16,7 @@ class Message:
     content: str
     timestamp: float = field(default_factory=time.time)
     sources: list[dict] = field(default_factory=list)  # RAG 检索来源（仅 assistant）
+    tool_steps: list[dict] = field(default_factory=list)  # Agent 工具调用步骤（v0.9）
 
     def to_dict(self) -> dict:
         return {
@@ -23,6 +24,7 @@ class Message:
             "content": self.content,
             "timestamp": self.timestamp,
             "sources": self.sources,
+            "tool_steps": self.tool_steps,
         }
 
     def to_llm_dict(self) -> dict:
@@ -40,8 +42,10 @@ class Conversation:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
-    def add_message(self, role: str, content: str, sources: list[dict] = None):
-        msg = Message(role=role, content=content, sources=sources or [])
+    def add_message(self, role: str, content: str, sources: list[dict] = None,
+                    tool_steps: list[dict] = None):
+        msg = Message(role=role, content=content, sources=sources or [],
+                      tool_steps=tool_steps or [])
         self.messages.append(msg)
         self.updated_at = time.time()
 
@@ -158,6 +162,7 @@ class ConversationManager:
                             content=msg_data["content"],
                             timestamp=msg_data.get("timestamp", 0),
                             sources=msg_data.get("sources", []),
+                            tool_steps=msg_data.get("tool_steps", []),
                         )
                     )
                 self._conversations[conv.id] = conv

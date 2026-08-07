@@ -139,3 +139,10 @@ security:
   admin_password: ""
   # 连续失败锁定次数（0 表示不锁定）
   max_login_attempts: 5
+
+# Agent 模式配置 (v0.9)
+agent:
+  # 单次任务最大工具调用轮数（达上限后强制模型基于已有结果总结）
+  max_iterations: 6
+  # Agent 默认检索的知识库
+  default_collection: "default"

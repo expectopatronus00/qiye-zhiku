@@ -51,6 +51,13 @@ class ChatResponse(BaseModel):
     rewritten_query: Optional[str] = None  # 改写后的查询（仅发生改写时返回）
 
 
+class AgentRequest(BaseModel):
+    """Agent 模式对话请求 (v0.9)"""
+    message: str
+    collection_name: str = "default"
+    conversation_id: Optional[str] = None  # 对话 ID，为空则创建新对话
+
+
 class ConversationInfo(BaseModel):
     """对话信息"""
     id: str
@@ -267,3 +274,68 @@ async def chat_stream(request: ChatRequest, user: User = Depends(get_current_use
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+@router.post("/agent")
+async def chat_agent(request: AgentRequest, user: User = Depends(get_current_user)):
+    """Agent 模式：Function Calling + 工具调用 + 多步推理 (v0.9)
+
+    模型不支持工具调用时自动降级为普通 RAG 回答（fallback 标记返回）。
+    """
+    from app.core.agent import run_agent
+
+    require_kb_access(request.collection_name, user)
+    conv = _get_or_create_conv(request)
+
+    # 记录用户消息
+    conv.add_message("user", request.message)
+    conversation_manager.save(conv)
+
+    history = conv.get_history(max_turns=5)[:-1]  # 不含刚添加的当前消息
+
+    try:
+        result = await run_agent(
+            request.message, user,
+            collection=request.collection_name,
+            history=history,
+        )
+    except Exception as exc:
+        # LLM 不支持工具调用（或临时故障）→ 降级普通 RAG
+        llm = LLMService()
+        try:
+            rag_request = ChatRequest(
+                message=request.message,
+                collection_name=request.collection_name,
+                use_rag=True,
+                stream=False,
+            )
+            # _prepare_rag_messages 会重新记录用户消息，先移除刚加的
+            if conv.messages and conv.messages[-1].role == "user":
+                conv.messages.pop()
+            messages, sources, rewritten = await _prepare_rag_messages(llm, conv, rag_request)
+            answer = await llm.chat(messages)
+            result = {"answer": answer, "steps": [], "source_files": [],
+                      "fallback": True, "reason": str(exc)}
+        except Exception:
+            raise HTTPException(status_code=500, detail=f"Agent 调用失败: {exc}")
+
+    # 持久化助手回复（含工具步骤）
+    conv.add_message("assistant", result["answer"], sources=[], tool_steps=result["steps"])
+    conversation_manager.save(conv)
+
+    get_audit_logger().log(
+        user.username, "chat.agent", conv.collection_name,
+        f"对话 {conv.id}，问题: {request.message[:80]}，"
+        f"工具调用 {len(result['steps'])} 次，来源 {len(result.get('source_files', []))} 个",
+    )
+
+    return {
+        "answer": result["answer"],
+        "tool_steps": result["steps"],
+        "source_files": result.get("source_files", []),
+        "model": LLMService().model,
+        "conversation_id": conv.id,
+        "iterations": result.get("iterations", 0),
+        "fallback": result.get("fallback", False),
+        "fallback_reason": result.get("reason", ""),
+    }

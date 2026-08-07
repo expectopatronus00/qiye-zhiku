@@ -13,6 +13,7 @@
 
 ## 核心特性
 
+- **Agent 模式（v0.9）**：Function Calling 工具调用 + 多步推理（检索知识库/精读文档全文/知识库统计/当前时间），输入区一键切换，回答下方展示可折叠的"推理过程"（每步工具名/参数/耗时/结果），模型不支持工具调用时自动降级普通 RAG
 - **全面 UI 重构（v0.8）**：现代深色科技感设计系统（蓝紫渐变 + 玻璃拟态 + 柔和发光），一键切换浅色主题（记忆偏好 + 跟随系统 + URL 强制）
 - **Mini-Markdown 安全渲染（v0.8）**：回答富文本渲染（列表/表格/代码/引用/标题），纯 DOM 构建零注入风险
 - **引用溯源交互（v0.8）**：回答中 [n] 引用角标可点击高亮对应来源卡片；来源卡片显示相关度并可展开片段、查看全文
@@ -190,6 +191,28 @@ curl -X POST http://localhost:8000/api/auth/register \
 
 对话消息新增后实时落盘（`data/conversations/*.json`），服务重启后历史对话与标题完整保留。
 
+### Agent 模式（v0.9）
+
+输入区右下角点击 **⚡ Agent 模式** 开关，进入工具调用模式：模型自主决定调用哪些工具、按什么顺序调用，多步推理后给出最终回答。
+
+```text
+用户: 请检索 default 知识库并总结 3b8f99e6_layout_test.pdf 的主要内容
+        ↓ Agent 决策
+工具: preview_document(filename="3b8f99e6_layout_test.pdf", collection="default")  5ms
+        ↓ 结果回填，模型综合推理
+回答: 文档总结（监控指标/告警阈值表/通知流程）+ 依据文件名
+```
+
+- **内置工具集**：`search_knowledge_base`（检索知识库）、`preview_document`（精读文档全文）、`list_knowledge_bases`（可见库列表）、`knowledge_base_stats`（库统计/文档清单）、`get_current_time`（当前时间）
+- **工具注册表**：装饰器注册，从函数签名自动生成 OpenAI 兼容 function schema（依赖注入参数如当前用户不暴露给模型，权限在工具内部二次校验）
+- **Agent 循环**：LLM 决策 → 执行工具 → 结果以 `role=tool` 回填 → 再决策，直到给出答案或达到迭代上限（`agent.max_iterations`，默认 6）；工具失败不中断，错误结果回填让模型换参数重试
+- **双通道兼容**：Ollama `/api/chat` tools 与 OpenAI `chat/completions` tools 均支持（自动适配 arguments 对象/JSON 字符串格式差异）
+- **自动降级**：模型不支持工具调用（或临时故障）时自动降级为普通 RAG 流程，回答附降级提示条，服务不中断
+- **推理过程可视化**：回答下方展示可折叠"推理过程"卡片（工具名/参数摘要/耗时/展开查看结果），来源文档以徽章列出；对话落盘含工具步骤，刷新/深链恢复后完整还原
+- **审计**：`chat.agent` 动作留痕（含工具调用次数与来源数）
+
+API：`POST /api/chat/agent`（body 同普通对话：`{message, collection_name, conversation_id}`）。
+
 ## 项目结构
 
 ```
@@ -201,14 +224,16 @@ qiye-zhiku/
 ├── ROADMAP.md              # 迭代路线图
 ├── app/
 │   ├── core/               # 核心模块
+│   │   ├── agent.py        # Agent 执行引擎（工具调用循环 + 多步推理，v0.9）
 │   │   ├── config.py       # 配置管理
 │   │   ├── conversation.py # 对话历史管理
 │   │   ├── document.py     # 文档处理
 │   │   ├── embeddings.py   # 向量嵌入
 │   │   ├── evaluator.py    # RAGAS 评估（忠实度/相关性/召回率，本地裁判）
-│   │   ├── llm.py          # LLM 调用
+│   │   ├── llm.py          # LLM 调用（含 Function Calling / Tools API）
 │   │   ├── reranker.py     # 检索结果重排序（cross-encoder / 启发式）
 │   │   ├── retriever.py    # 检索引擎
+│   │   ├── tools.py        # Agent 工具注册表 + 内置工具集（v0.9）
 │   │   └── vectorstore.py  # 向量存储
 │   ├── routers/            # API 路由
 │   │   ├── chat.py         # 对话接口（含多轮对话）
@@ -236,6 +261,7 @@ qiye-zhiku/
 | 2026-08-05 | v0.6 | 评估体系：RAGAS 方法论三大指标（忠实度/答案相关性/上下文召回率），本地裁判（qwen2.5:7b，温度 0）全离线评估 + 黄金评测集 + 质量门禁（可接 CI）+ 数值字面预检（归一化+确定性校验，忠实度 0.81→1.00、召回率 0.85→0.96），评估器单元测试 29 项 |
 | 2026-08-05 | v0.7 | 权限管理：多用户认证（PBKDF2 哈希 + 令牌 + 失败锁定）、知识库属主隔离（存量库自动迁移）、操作审计日志（admin 专属可视化面板）、登录页/权限前端，安全模块单元测试 24 项，e2e 权限链路 16 项全过 |
 | 2026-08-05 | v0.8 | 高级 UI：全面重构设计系统（深色默认 + 浅色切换 + 渐变/玻璃拟态/发光）、Mini-Markdown 安全渲染、来源卡片 + 引用 [n] 点击高亮、文档预览面板（按原文顺序 + 块类型徽章）、对话导出 Markdown、`?conv=` 深链恢复、内网免登录直入（`/api/auth/status` 自适应）、对话消息实时落盘（重启不丢），全量单元测试 84 项 + e2e 16 项全过，截图视觉验证（深浅主题/登录页/欢迎页/对话视图） |
+| 2026-08-07 | v0.9 | Agent 模式：Function Calling 双通道（Ollama tools / OpenAI tools 自动适配 arguments 格式差异）、工具注册表（装饰器 + 签名自动生成 schema，依赖注入不暴露给模型）、内置 5 工具（检索/文档精读/库列表/库统计/时间）、Agent 多步推理循环（失败重试 + 迭代上限 + 上限强制总结）、前端 ⚡ Agent 模式开关 + 可折叠推理过程可视化（工具名/参数/耗时/结果 + 来源文件徽章）、模型不支持工具调用自动降级普通 RAG、对话落盘含工具步骤（深链恢复还原），修复 Ollama 回填消息 400 与 `can_access(None)` 崩溃，全量单元测试 102 项全过，真机验证工具调用全链路 + 截图验证折叠/展开态 |
 | ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景

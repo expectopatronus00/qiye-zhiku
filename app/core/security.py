@@ -312,7 +312,12 @@ class KBRegistry:
         ]
 
     def can_access(self, name: str, user: User) -> bool:
-        """用户是否有权使用该知识库（管理员或属主，库不存在则无权）"""
+        """用户是否有权使用该知识库（管理员或属主，库不存在则无权）
+
+        user 为 None（内部调用/未认证上下文）时视为无权。
+        """
+        if user is None:
+            return False
         kb = self.get(name)
         if kb is None:
             return False

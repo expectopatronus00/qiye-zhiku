@@ -91,6 +91,12 @@ class SecurityConfig(BaseModel):
     max_login_attempts: int = 5      # 连续失败锁定次数（0 表示不锁定）
 
 
+class AgentConfig(BaseModel):
+    """Agent 模式配置 (v0.9)"""
+    max_iterations: int = 6         # 单次任务最大工具调用轮数（防失控循环）
+    default_collection: str = "default"  # 未指定知识库时的默认检索范围
+
+
 class DataConfig(BaseModel):
     uploads: str = "./data/uploads"
     vectorstore: str = "./data/vectorstore"
@@ -109,6 +115,7 @@ class Settings(BaseModel):
     reranker: RerankerConfig = RerankerConfig()
     eval: EvalConfig = EvalConfig()
     security: SecurityConfig = SecurityConfig()
+    agent: AgentConfig = AgentConfig()
     data: DataConfig = DataConfig()
 
 
