@@ -5,7 +5,7 @@
 
 ## 项目是什么
 
-面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.0（生产加固完成），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.0 已完成）。
+面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.1（管理后台），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.1 已完成）。
 
 技术栈：Python 3.11 / FastAPI / ChromaDB / SQLite / jieba / PyMuPDF / RapidOCR / pytest。
 
@@ -51,10 +51,11 @@ app/routers/       API 层（prefix 各自带 /api）
   chat.py          对话（/api/chat，含 POST /stream SSE 流式 + Agent 模式）
   documents.py     文档（/api/documents，上传/列表/预览）
   knowledge.py     知识库（/api/knowledge，创建/查询/统计）
-  audit.py         审计（/api/audit，仅管理员）
+  audit.py         审计（/api/audit，仅管理员；GET /export CSV 带 BOM）
+  admin.py         管理后台（/api/admin：用户管理/知识库配额/系统配置热更新，仅管理员）
   health.py        健康检查（/healthz 存活 + /readyz 就绪探测：向量库/DB/LLM 三段判定）
 app/static/index.html  前端单页（原生 JS，深色设计系统 + 浅色主题，无构建步骤）
-tests/             pytest 测试（108 项，按模块拆分 test_*.py）
+tests/             pytest 测试（129 项，按模块拆分 test_*.py）
 ```
 
 ## 常用命令
@@ -76,7 +77,9 @@ curl http://127.0.0.1:8766/healthz && curl http://127.0.0.1:8766/readyz
 5. msedge headless 截图：必须全新 `--user-data-dir` + URL 带 `?theme=dark` + `--virtual-time-budget=9000` + `file:///` 绝对路径（相对路径报"拒绝访问 0x5"）；Edge 忽略 `--force-prefers-color-scheme`
 6. Git push 直连报 "fetch first"/Connection reset 属正常 → 用工作区 `git_api_push_v2.py`（必须 cd 到项目目录内运行 + 完整 Python 执行）；commit message 必须纯 ASCII
 7. Windows 无 /tmp；curl 输出写到工作区路径；读 JSON 用 `encoding='utf-8'`（GBK 会乱码）；git 子进程加 `encoding="utf-8",errors="replace"`
-8. 上传大文档是同步阻塞的（v1.1 规划异步队列），验证上传接口注意超时
+8. 上传大文档是同步阻塞的（v1.2 规划异步队列），验证上传接口注意超时
+9. 管理后台 API 全部走审计日志；保护规则：不能禁用/删除 admin 账号、不能删除自己；配额校验"新值 < 已用量"返回 400
+10. config.yaml 热更新仅白名单字段（config.py ADMIN_EDITABLE），API key 在接口中遮蔽为 "****"，空字符串 key 表示保留原值
 
 ## 迭代工作流（每个版本必须）
 
