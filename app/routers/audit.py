@@ -1,5 +1,9 @@
-"""操作审计日志 API 路由 (v0.7) - 仅管理员可查询"""
+"""操作审计日志 API 路由 (v0.7 查询 / v1.1 导出) - 仅管理员可查询"""
+import csv
+import io
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core.security import User, get_audit_logger, require_admin
@@ -39,4 +43,28 @@ async def list_audit(
     return AuditPage(
         total=data["total"], page=data["page"], size=data["size"],
         items=[AuditItem(**item) for item in data["items"]],
+    )
+
+
+@router.get("/export")
+async def export_audit(
+    user: str = "",
+    action: str = "",
+    admin: User = Depends(require_admin),
+):
+    """导出审计日志为 CSV（UTF-8 BOM，Excel 直接打开不乱码；最多 5000 条）"""
+    data = get_audit_logger().query(user_filter=user, action_filter=action,
+                                    page=1, size=5000)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ID", "时间", "用户", "动作", "对象", "详情"])
+    for item in data["items"]:
+        writer.writerow([item["id"], item["ts"], item["user"],
+                         item["action"], item["target"], item["detail"]])
+    csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")
+    filename = f"audit_log_{user or 'all'}_{action or 'all'}.csv"
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

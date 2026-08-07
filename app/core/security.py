@@ -37,6 +37,7 @@ class User:
     username: str
     role: str = "user"          # user | admin
     display_name: str = ""
+    enabled: bool = True
 
     @property
     def is_admin(self) -> bool:
@@ -45,10 +46,12 @@ class User:
 
 @dataclass
 class KnowledgeBase:
-    """知识库归属记录"""
+    """知识库归属记录（v1.1 含配额，-1 表示不限制）"""
     name: str
     owner: str
     display_name: str = ""
+    quota_chunks: int = -1
+    quota_documents: int = -1
     created_at: str = ""
 
 
@@ -99,12 +102,15 @@ class _DB:
                     token_expires TEXT,
                     fail_count  INTEGER NOT NULL DEFAULT 0,
                     locked_until TEXT,
+                    enabled     INTEGER NOT NULL DEFAULT 1,
                     created_at  TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS knowledge_bases (
                     name         TEXT PRIMARY KEY,
                     owner        TEXT NOT NULL,
                     display_name TEXT NOT NULL DEFAULT '',
+                    quota_chunks INTEGER NOT NULL DEFAULT -1,
+                    quota_documents INTEGER NOT NULL DEFAULT -1,
                     created_at   TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -120,6 +126,20 @@ class _DB:
                 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
                 """
             )
+            # 存量库兼容迁移 (v1.1): users.enabled / knowledge_bases.quota_*
+            user_cols = [r["name"] for r in
+                         self._conn.execute("PRAGMA table_info(users)").fetchall()]
+            if "enabled" not in user_cols:
+                self._conn.execute(
+                    "ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+            kb_cols = [r["name"] for r in
+                       self._conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()]
+            if "quota_chunks" not in kb_cols:
+                self._conn.execute("ALTER TABLE knowledge_bases "
+                                   "ADD COLUMN quota_chunks INTEGER NOT NULL DEFAULT -1")
+            if "quota_documents" not in kb_cols:
+                self._conn.execute("ALTER TABLE knowledge_bases "
+                                   "ADD COLUMN quota_documents INTEGER NOT NULL DEFAULT -1")
             self._conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> int:
@@ -206,6 +226,8 @@ class UserManager:
         row = self.db.query_one("SELECT * FROM users WHERE username=?", (username,))
         if not row:
             return None, "用户名或密码错误"
+        if not row["enabled"]:
+            return None, "账号已被禁用，请联系管理员"
         # 锁定检查
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         if self.max_attempts > 0 and row["locked_until"] and row["locked_until"] > now:
@@ -243,11 +265,14 @@ class UserManager:
         row = self.db.query_one("SELECT * FROM users WHERE token=?", (token,))
         if not row:
             return None
+        if not row["enabled"]:
+            return None  # 禁用后令牌立即失效
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         if row["token_expires"] and row["token_expires"] < now:
             return None
         return User(username=row["username"], role=row["role"],
-                    display_name=row["display_name"] or row["username"])
+                    display_name=row["display_name"] or row["username"],
+                    enabled=bool(row["enabled"]))
 
     def logout(self, token: str):
         if token:
@@ -262,6 +287,86 @@ class UserManager:
             "UPDATE users SET pass_hash=? WHERE username=?",
             (hash_password(new_password), username))
         return True, ""
+
+    # ---- v1.1 管理后台方法（仅管理员调用） ----
+
+    def list_users(self, keyword: str = "", page: int = 1, size: int = 20) -> dict:
+        """用户列表（不含密码哈希/令牌），支持关键字模糊搜索"""
+        where, params = [], []
+        if keyword:
+            where.append("(username LIKE ? OR display_name LIKE ?)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        cond = ("WHERE " + " AND ".join(where)) if where else ""
+        total = self.db.query_one(f"SELECT COUNT(*) AS c FROM users {cond}",
+                                  tuple(params))["c"]
+        rows = self.db.query(
+            f"SELECT username, role, display_name, enabled, fail_count, locked_until, "
+            f"created_at FROM users {cond} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            tuple(params + [size, (page - 1) * size]),
+        )
+        return {"total": total, "page": page, "size": size, "items": rows}
+
+    def admin_create_user(self, username: str, password: str,
+                          display_name: str = "", role: str = "user") -> User:
+        """管理员代建用户（支持指定角色）"""
+        if role not in ("user", "admin"):
+            raise ValueError("角色仅支持 user / admin")
+        user = self.register(username, password, display_name)
+        if role == "admin":
+            self.db.execute("UPDATE users SET role='admin' WHERE username=?",
+                            (username,))
+        return User(username=user.username, role=role, display_name=user.display_name)
+
+    def set_enabled(self, username: str, enabled: bool) -> None:
+        """启用/禁用账号；禁用时立即吊销令牌"""
+        if not self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
+            raise ValueError(f"用户 '{username}' 不存在")
+        if enabled:
+            self.db.execute("UPDATE users SET enabled=1 WHERE username=?", (username,))
+        else:
+            self.db.execute(
+                "UPDATE users SET enabled=0, token='', token_expires='' WHERE username=?",
+                (username,))
+
+    def set_display_name(self, username: str, display_name: str) -> None:
+        if not self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
+            raise ValueError(f"用户 '{username}' 不存在")
+        self.db.execute("UPDATE users SET display_name=? WHERE username=?",
+                        (display_name, username))
+
+    def set_role(self, username: str, role: str) -> None:
+        if role not in ("user", "admin"):
+            raise ValueError("角色仅支持 user / admin")
+        if not self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
+            raise ValueError(f"用户 '{username}' 不存在")
+        self.db.execute("UPDATE users SET role=? WHERE username=?", (role, username))
+
+    def reset_password(self, username: str, new_password: str) -> None:
+        """管理员重置密码（同时吊销该用户全部令牌）"""
+        if len(new_password) < 6:
+            raise ValueError("密码长度至少 6 位")
+        if not self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
+            raise ValueError(f"用户 '{username}' 不存在")
+        self.db.execute(
+            "UPDATE users SET pass_hash=?, token='', token_expires='' WHERE username=?",
+            (hash_password(new_password), username))
+
+    def delete_user(self, username: str) -> None:
+        """删除用户（管理路由层需校验：不可删 admin、不可删自己）"""
+        self.db.execute("DELETE FROM users WHERE username=?", (username,))
+
+    def unlock(self, username: str) -> None:
+        """清除锁定状态"""
+        if not self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
+            raise ValueError(f"用户 '{username}' 不存在")
+        self.db.execute(
+            "UPDATE users SET fail_count=0, locked_until='' WHERE username=?", (username,))
+
+    def get_user(self, username: str) -> Optional[dict]:
+        """查询用户公开信息（管理台详情用）"""
+        return self.db.query_one(
+            "SELECT username, role, display_name, enabled, fail_count, locked_until, "
+            "created_at FROM users WHERE username=?", (username,))
 
 
 # ---------------- 知识库权限 ----------------
@@ -286,8 +391,33 @@ class KBRegistry:
         row = self.db.query_one("SELECT * FROM knowledge_bases WHERE name=?", (name,))
         if not row:
             return None
-        return KnowledgeBase(name=row["name"], owner=row["owner"],
-                             display_name=row["display_name"], created_at=row["created_at"])
+        return KnowledgeBase(
+            name=row["name"], owner=row["owner"],
+            display_name=row["display_name"],
+            quota_chunks=row["quota_chunks"], quota_documents=row["quota_documents"],
+            created_at=row["created_at"])
+
+    def set_quota(self, name: str, quota_chunks: int = -1,
+                  quota_documents: int = -1) -> None:
+        """设置知识库配额（-1 不限制；不能小于当前用量由路由层校验）"""
+        if not self.db.query_one("SELECT 1 FROM knowledge_bases WHERE name=?", (name,)):
+            raise ValueError(f"知识库 '{name}' 不存在")
+        if quota_chunks != -1 and quota_chunks < 0:
+            raise ValueError("块数配额需为 -1（不限）或非负整数")
+        if quota_documents != -1 and quota_documents < 0:
+            raise ValueError("文档数配额需为 -1（不限）或非负整数")
+        self.db.execute(
+            "UPDATE knowledge_bases SET quota_chunks=?, quota_documents=? WHERE name=?",
+            (quota_chunks, quota_documents, name))
+
+    def transfer_owner(self, old_owner: str, new_owner: str) -> int:
+        """批量转移知识库属主（删除用户时保留数据），返回转移数"""
+        count = self.db.query_one(
+            "SELECT COUNT(*) AS c FROM knowledge_bases WHERE owner=?",
+            (old_owner,))["c"]
+        self.db.execute(
+            "UPDATE knowledge_bases SET owner=? WHERE owner=?", (new_owner, old_owner))
+        return count
 
     def delete(self, name: str):
         self.db.execute("DELETE FROM knowledge_bases WHERE name=?", (name,))
@@ -295,7 +425,10 @@ class KBRegistry:
     def list_all(self) -> list[KnowledgeBase]:
         return [
             KnowledgeBase(name=r["name"], owner=r["owner"],
-                          display_name=r["display_name"], created_at=r["created_at"])
+                          display_name=r["display_name"],
+                          quota_chunks=r["quota_chunks"],
+                          quota_documents=r["quota_documents"],
+                          created_at=r["created_at"])
             for r in self.db.query("SELECT * FROM knowledge_bases ORDER BY created_at DESC")
         ]
 
@@ -305,7 +438,10 @@ class KBRegistry:
             return self.list_all()
         return [
             KnowledgeBase(name=r["name"], owner=r["owner"],
-                          display_name=r["display_name"], created_at=r["created_at"])
+                          display_name=r["display_name"],
+                          quota_chunks=r["quota_chunks"],
+                          quota_documents=r["quota_documents"],
+                          created_at=r["created_at"])
             for r in self.db.query(
                 "SELECT * FROM knowledge_bases WHERE owner=? ORDER BY created_at DESC",
                 (user.username,))

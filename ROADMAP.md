@@ -16,6 +16,7 @@
 | Day 8 | v0.8 | 高级 UI | ✅ 全面 UI 重构（深色设计系统 + 浅色主题切换）、Mini-Markdown 安全渲染、来源卡片 + 引用 [n] 点击高亮、文档预览面板、对话导出 Markdown、URL 深链恢复对话、内网免登录模式 |
 | Day 9 | v0.9 | Agent 模式 | ✅ Function Calling（Ollama/OpenAI 双通道）、工具注册表（schema 自动生成）、Agent 多步推理循环（检索/文档精读/知识库统计/时间，失败重试 + 迭代上限）、前端 Agent 模式开关 + 推理过程可视化（可折叠步骤/时长/结果）、模型不支持工具调用自动降级普通 RAG |
 | Day 10 | v1.0 | 生产加固 | ✅ 统一日志体系（文件轮转 5MB×5 + 控制台双通道 + 请求日志中间件含用户/耗时）、健康检查（/healthz 存活 + /readyz 依赖探测：向量库/数据库/Ollama，LLM 异常 degraded 不阻塞、核心失败 503）、Docker Compose 一键部署（app + Ollama 编排、健康依赖启动、非 root 运行、数据卷持久化、GPU 可选） |
+| Day 11 | v1.1 | 系统管理后台 | ✅ 管理控制台 4-Tab（审计日志查询+CSV导出 / 用户管理 CRUD+禁用启用+重置密码+解锁 / 知识库配额-1不限 / 系统配置热更新写回 config.yaml 密钥脱敏）、用户禁用即时吊销令牌、删除用户知识库自动转移、上传配额超限 403、存量库自动迁移（users.enabled / knowledge_bases.quota_*）、前端管理台入口（仅管理员可见） |
 
 ## 后续演进（v1.1+）
 

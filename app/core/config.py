@@ -138,3 +138,56 @@ def load_settings(config_path: Optional[str] = None) -> Settings:
 
 # 全局配置实例
 settings = load_settings()
+
+# ---------------- 管理台热更新 (v1.1) ----------------
+
+# 管理台可编辑的配置节与字段白名单（安全敏感项如 db_path/上传目录不回传；
+# openai_api_key 可更新但查看时脱敏，留空表示保留原值）
+ADMIN_EDITABLE: dict[str, set[str]] = {
+    "llm": {"provider", "model", "ollama_base_url", "openai_base_url",
+            "temperature", "max_tokens", "openai_api_key"},
+    "embedding": {"provider", "model", "local_model_path", "openai_api_key"},
+    "retrieval": {"top_k", "score_threshold", "hybrid_search", "bm25_weight"},
+    "reranker": {"enabled", "type", "top_n"},
+    "query_rewrite": {"enabled", "max_history_turns"},
+    "agent": {"max_iterations"},
+    "document": {"chunk_size", "chunk_overlap", "ocr_enabled"},
+}
+
+_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
+
+
+def get_config_view() -> dict:
+    """返回管理台可编辑配置（密钥脱敏为 ****）"""
+    data = settings.model_dump()
+    for key in ("openai_api_key",):
+        if data["llm"].get(key):
+            data["llm"][key] = "****"
+        if data["embedding"].get(key):
+            data["embedding"][key] = "****"
+    return {k: data[k] for k in ADMIN_EDITABLE}
+
+
+def update_config(patch: dict) -> dict:
+    """热更新配置并写回 config.yaml；空串密钥视为保留原值"""
+    for section, fields in (patch or {}).items():
+        if section not in ADMIN_EDITABLE:
+            raise ValueError(f"不允许修改配置节: {section}")
+        current = getattr(settings, section)
+        for field, value in fields.items():
+            if field not in ADMIN_EDITABLE[section]:
+                raise ValueError(f"不允许修改配置项: {section}.{field}")
+            if value is None:
+                continue
+            if field == "openai_api_key" and str(value).strip() == "":
+                continue  # 空串保留原密钥
+            setattr(current, field, value)
+    _write_config(settings)
+    return get_config_view()
+
+
+def _write_config(s: Settings) -> None:
+    """全量写回 config.yaml（含未修改项，保留密钥原值）"""
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        f.write("# 企业智库配置\n# 注：本文件可由管理台「系统配置」页保存时自动更新\n\n")
+        yaml.safe_dump(s.model_dump(), f, allow_unicode=True, sort_keys=False)

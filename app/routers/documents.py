@@ -77,13 +77,37 @@ async def upload_document(
         )
         sub_chunks = splitter.split(chunks)
 
+        # v1.1 配额校验（块数 + 文档数，-1 表示不限制）
+        registry = get_kb_registry()
+        kb = registry.get(collection_name)
+        vectorstore = VectorStore(collection_name=collection_name)
+        existing_chunks = vectorstore.count()
+        doc_count = 0
+        if kb is not None and (kb.quota_chunks >= 0 or kb.quota_documents >= 0):
+            try:
+                metas = vectorstore.collection.get(
+                    include=["metadatas"]).get("metadatas") or []
+                doc_count = len({m.get("filename", "unknown") for m in metas})
+            except Exception:
+                pass
+        if kb is not None and kb.quota_chunks >= 0 and \
+                existing_chunks + len(sub_chunks) > kb.quota_chunks:
+            raise HTTPException(
+                status_code=403,
+                detail=f"知识库 '{collection_name}' 块数配额 {kb.quota_chunks} 已满"
+                       f"（当前 {existing_chunks}，本次新增 {len(sub_chunks)}），请联系管理员调整配额")
+        if kb is not None and kb.quota_documents >= 0 and doc_count + 1 > kb.quota_documents:
+            raise HTTPException(
+                status_code=403,
+                detail=f"知识库 '{collection_name}' 文档数配额 {kb.quota_documents} 已满"
+                       f"（当前 {doc_count} 份），请联系管理员调整配额")
+
         # 生成嵌入向量
         embedding_service = EmbeddingService()
         texts = [chunk.content for chunk in sub_chunks]
         embeddings = await embedding_service.embed_text(texts)
 
         # 存入向量数据库
-        vectorstore = VectorStore(collection_name=collection_name)
         ids = [f"{file_id}_{i}" for i in range(len(sub_chunks))]
         metadatas = [chunk.metadata for chunk in sub_chunks]
 
@@ -104,6 +128,11 @@ async def upload_document(
             status="success",
         )
 
+    except HTTPException:
+        # 业务异常（配额超限/格式不支持等）原样透传，不包 500
+        if save_path.exists():
+            save_path.unlink()
+        raise
     except Exception as e:
         # 清理失败的文件
         if save_path.exists():

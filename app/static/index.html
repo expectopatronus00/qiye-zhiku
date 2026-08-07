@@ -22,7 +22,7 @@
             <div class="sidebar-header">
                 <div class="logo-badge">智</div>
                 <h1>企业智库</h1>
-                <span class="version">v0.8</span>
+                <span class="version">v1.1</span>
             </div>
 
             <!-- 用户信息 -->
@@ -84,7 +84,7 @@
                     <input type="checkbox" id="rag-toggle" checked>
                 </label>
                 <div class="footer-actions">
-                    <button class="btn btn-small" onclick="openAuditPanel()" id="btn-audit" style="display:none;">审计日志</button>
+                    <button class="btn btn-small" onclick="openAdminPanel('audit')" id="btn-admin" style="display:none;" title="系统管理台（审计/用户/配额/配置）">管理台</button>
                     <button class="btn btn-small" id="btn-theme" onclick="toggleTheme()" title="切换主题">
                         <span id="theme-icon">☀</span>
                     </button>
@@ -154,50 +154,129 @@
         </div>
     </div>
 
-    <!-- 审计日志面板 -->
-    <div class="modal-overlay" id="audit-modal" style="display:none;" onclick="if(event.target===this)closeAuditPanel()">
-        <div class="modal-card">
+    <!-- 管理台面板 (v1.1: 审计/用户/知识库配额/系统配置) -->
+    <div class="modal-overlay" id="admin-modal" style="display:none;" onclick="if(event.target===this)closeAdminPanel()">
+        <div class="modal-card admin-card">
             <div class="modal-header">
-                <h3>操作审计日志</h3>
-                <button class="modal-close" onclick="closeAuditPanel()">&times;</button>
+                <h3>系统管理台</h3>
+                <button class="modal-close" onclick="closeAdminPanel()">&times;</button>
             </div>
-            <div class="modal-filters">
-                <input type="text" id="audit-user-filter" placeholder="按用户过滤" class="filter-input">
-                <select id="audit-action-filter" class="filter-input">
-                    <option value="">全部动作</option>
-                    <option value="auth.login">登录</option>
-                    <option value="auth.login_failed">登录失败</option>
-                    <option value="auth.logout">登出</option>
-                    <option value="auth.change_password">修改密码</option>
-                    <option value="user.register">用户注册</option>
-                    <option value="kb.create">创建知识库</option>
-                    <option value="kb.delete">删除知识库</option>
-                    <option value="document.upload">上传文档</option>
-                    <option value="chat.completion">问答</option>
-                    <option value="chat.stream">流式问答</option>
-                    <option value="system.startup">系统启动</option>
-                </select>
-                <button class="btn btn-small" onclick="loadAudit(1)">查询</button>
+            <div class="admin-tabs">
+                <button class="admin-tab active" data-tab="audit" onclick="switchAdminTab('audit')">审计日志</button>
+                <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">用户管理</button>
+                <button class="admin-tab" data-tab="kbs" onclick="switchAdminTab('kbs')">知识库配额</button>
+                <button class="admin-tab" data-tab="config" onclick="switchAdminTab('config')">系统配置</button>
             </div>
-            <div class="modal-body">
-                <table class="audit-table">
-                    <thead>
-                        <tr>
-                            <th>时间</th>
-                            <th>用户</th>
-                            <th>动作</th>
-                            <th>对象</th>
-                            <th>详情</th>
-                        </tr>
-                    </thead>
-                    <tbody id="audit-tbody">
-                        <tr><td colspan="5" class="audit-empty">加载中...</td></tr>
-                    </tbody>
-                </table>
+
+            <!-- 审计日志 tab -->
+            <div class="admin-panel" id="admin-panel-audit">
+                <div class="modal-filters">
+                    <input type="text" id="audit-user-filter" placeholder="按用户过滤" class="filter-input">
+                    <select id="audit-action-filter" class="filter-input">
+                        <option value="">全部动作</option>
+                        <option value="auth.login">登录</option>
+                        <option value="auth.login_failed">登录失败</option>
+                        <option value="auth.logout">登出</option>
+                        <option value="auth.change_password">修改密码</option>
+                        <option value="user.register">用户注册</option>
+                        <option value="admin.user_create">代建用户</option>
+                        <option value="admin.user_disable">禁用用户</option>
+                        <option value="admin.user_delete">删除用户</option>
+                        <option value="admin.user_reset_password">重置密码</option>
+                        <option value="admin.user_unlock">解锁用户</option>
+                        <option value="kb.create">创建知识库</option>
+                        <option value="kb.delete">删除知识库</option>
+                        <option value="kb.quota">调整配额</option>
+                        <option value="document.upload">上传文档</option>
+                        <option value="chat.completion">问答</option>
+                        <option value="chat.stream">流式问答</option>
+                        <option value="config.update">修改配置</option>
+                        <option value="system.startup">系统启动</option>
+                    </select>
+                    <button class="btn btn-small" onclick="loadAudit(1)">查询</button>
+                    <button class="btn btn-small" onclick="exportAudit()" title="导出当前过滤条件下的日志(CSV)">导出</button>
+                </div>
+                <div class="modal-body">
+                    <table class="audit-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>用户</th>
+                                <th>动作</th>
+                                <th>对象</th>
+                                <th>详情</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-tbody">
+                            <tr><td colspan="5" class="audit-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="modal-pager">
+                        <button class="btn btn-small" id="audit-prev" onclick="loadAudit(auditPage-1)">上一页</button>
+                        <span id="audit-page-info"></span>
+                        <button class="btn btn-small" id="audit-next" onclick="loadAudit(auditPage+1)">下一页</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 用户管理 tab -->
+            <div class="admin-panel" id="admin-panel-users" style="display:none;">
+                <div class="admin-form-row">
+                    <input type="text" id="admin-user-keyword" placeholder="搜索用户名/显示名" class="filter-input">
+                    <button class="btn btn-small" onclick="loadAdminUsers(1)">搜索</button>
+                    <span class="admin-form-sep"></span>
+                    <input type="text" id="admin-new-username" placeholder="用户名" class="filter-input">
+                    <input type="password" id="admin-new-password" placeholder="密码(≥6位)" class="filter-input">
+                    <input type="text" id="admin-new-display" placeholder="显示名" class="filter-input">
+                    <select id="admin-new-role" class="filter-input">
+                        <option value="user">用户</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                    <button class="btn btn-small" onclick="createAdminUser()">+ 新建</button>
+                </div>
+                <div class="modal-body">
+                    <table class="audit-table">
+                        <thead>
+                            <tr>
+                                <th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-users-tbody">
+                            <tr><td colspan="6" class="audit-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="modal-pager">
+                        <button class="btn btn-small" onclick="loadAdminUsers(adminUsersPage-1)">上一页</button>
+                        <span id="admin-users-page"></span>
+                        <button class="btn btn-small" onclick="loadAdminUsers(adminUsersPage+1)">下一页</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 知识库配额 tab -->
+            <div class="admin-panel" id="admin-panel-kbs" style="display:none;">
+                <p class="admin-tip">配额为 -1 表示不限制；设置值不能低于当前用量。</p>
+                <div class="modal-body">
+                    <table class="audit-table">
+                        <thead>
+                            <tr>
+                                <th>名称</th><th>属主</th><th>块数 / 配额</th><th>文档数 / 配额</th><th>创建时间</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-kbs-tbody">
+                            <tr><td colspan="6" class="audit-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 系统配置 tab -->
+            <div class="admin-panel" id="admin-panel-config" style="display:none;">
+                <p class="admin-tip">保存后立即生效并写回 config.yaml（API 密钥留空表示保留原值）。</p>
+                <div class="config-form" id="config-form">加载中...</div>
                 <div class="modal-pager">
-                    <button class="btn btn-small" id="audit-prev" onclick="loadAudit(auditPage-1)">上一页</button>
-                    <span id="audit-page-info"></span>
-                    <button class="btn btn-small" id="audit-next" onclick="loadAudit(auditPage+1)">下一页</button>
+                    <button class="btn btn-small" onclick="saveAdminConfig()">保存配置</button>
+                    <span id="config-msg"></span>
                 </div>
             </div>
         </div>

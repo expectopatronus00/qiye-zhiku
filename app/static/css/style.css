@@ -1721,3 +1721,45 @@ button {
     .chat-input-area { padding: 10px 14px 14px; }
     .message.assistant { max-width: 96%; }
 }
+
+/* ========== 管理台 (v1.1) ========== */
+.admin-card { width: min(960px, 94vw); max-height: 86vh; display: flex; flex-direction: column; }
+.admin-card .modal-body { overflow: auto; }
+.admin-tabs { display: flex; gap: 4px; padding: 10px 20px 0; border-bottom: 1px solid var(--border, rgba(128,128,128,.2)); }
+.admin-tab {
+    padding: 8px 18px; border: none; cursor: pointer; border-radius: 8px 8px 0 0;
+    background: transparent; color: var(--text-secondary, #8899aa);
+    font-size: 13px; transition: all .2s;
+}
+.admin-tab:hover { color: var(--primary, #4f7cff); background: var(--hover, rgba(79,124,255,.08)); }
+.admin-tab.active { color: var(--primary, #4f7cff); background: var(--gradient-soft, rgba(79,124,255,.12)); font-weight: 600; }
+.admin-panel { padding: 14px 20px 20px; overflow: auto; }
+.admin-form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.admin-form-row .filter-input { width: auto; min-width: 110px; }
+.admin-form-row .filter-input#admin-new-password { min-width: 130px; }
+.admin-form-sep { flex: 1; }
+.admin-tip { color: var(--text-secondary, #8899aa); font-size: 12px; margin: 0 0 10px; }
+.btn-mini {
+    padding: 3px 8px; font-size: 12px; border-radius: 6px; margin-right: 4px;
+    border: 1px solid var(--border, rgba(128,128,128,.25));
+    background: transparent; color: var(--text, #c8d3e0); cursor: pointer; transition: all .2s;
+}
+.btn-mini:hover { border-color: var(--primary, #4f7cff); color: var(--primary, #4f7cff); }
+.btn-mini.btn-danger:hover { border-color: #ff5b5b; color: #ff5b5b; }
+.ops-cell { white-space: nowrap; }
+.status-badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.status-on { background: rgba(34,197,94,.15); color: #22c55e; }
+.status-off { background: rgba(255,91,91,.15); color: #ff5b5b; }
+.badge-admin { background: linear-gradient(135deg, #4f7cff, #8b5cf6); color: #fff; }
+.quota-input {
+    width: 72px; padding: 2px 6px; border-radius: 6px; font-size: 12px;
+    border: 1px solid var(--border, rgba(128,128,128,.25));
+    background: var(--bg-soft, rgba(255,255,255,.05)); color: var(--text, #c8d3e0);
+}
+.config-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; padding: 4px 0 12px; }
+.config-row { display: flex; align-items: center; gap: 10px; }
+.config-label { flex: 0 0 130px; font-size: 13px; color: var(--text-secondary, #8899aa); text-align: right; }
+.config-input { flex: 1; min-width: 0; }
+.config-msg { font-size: 13px; margin-left: 10px; }
+.config-ok { color: #22c55e; }
+.config-err { color: #ff5b5b; }

@@ -1,12 +1,14 @@
 /**
- * 企业智库 RAG 问答系统 v0.8
- * 多轮对话 + 认证 + 知识库隔离 + 高级 UI（Markdown/来源卡片/文档预览/导出/暗黑模式）
+ * 企业智库 RAG 问答系统 v1.1
+ * 多轮对话 + 认证 + 知识库隔离 + 高级 UI + 管理后台（用户/配额/配置）
  */
 
 const API_BASE = '';
 let currentConversationId = null;
 let currentUser = null;
 let auditPage = 1;
+let adminUsersPage = 1;
+let adminConfig = null;   // 管理台配置缓存
 let activeSources = [];   // 当前回答来源（用于引用跳转）
 
 // ========== 主题 ==========
@@ -126,8 +128,8 @@ function renderUserInfo(user) {
     const roleEl = document.getElementById('user-role');
     roleEl.textContent = user.is_admin ? '管理员' : '用户';
     roleEl.className = 'user-role ' + (user.is_admin ? 'role-admin' : 'role-user');
-    // 管理员显示审计按钮
-    document.getElementById('btn-audit').style.display = user.is_admin ? '' : 'none';
+    // 管理员显示管理台按钮
+    document.getElementById('btn-admin').style.display = user.is_admin ? '' : 'none';
 }
 
 // 引导收尾：加载知识库/对话/统计，并按 ?conv= 参数打开指定对话
@@ -1083,17 +1085,31 @@ async function refreshStats() {
     }
 }
 
-// ========== 审计日志（管理员） ==========
+// ========== 系统管理台 (v1.1: 审计/用户/知识库配额/系统配置) ==========
 
-function openAuditPanel() {
-    auditPage = 1;
-    document.getElementById('audit-modal').style.display = 'flex';
-    loadAudit(1);
+function openAdminPanel(tab) {
+    document.getElementById('admin-modal').style.display = 'flex';
+    switchAdminTab(tab || 'audit');
 }
 
-function closeAuditPanel() {
-    document.getElementById('audit-modal').style.display = 'none';
+function closeAdminPanel() {
+    document.getElementById('admin-modal').style.display = 'none';
 }
+
+function switchAdminTab(tab) {
+    document.querySelectorAll('.admin-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    ['audit', 'users', 'kbs', 'config'].forEach(t => {
+        document.getElementById('admin-panel-' + t).style.display = (t === tab) ? '' : 'none';
+    });
+    if (tab === 'users') loadAdminUsers(1);
+    else if (tab === 'kbs') loadAdminKbs();
+    else if (tab === 'config') loadAdminConfig();
+    else loadAudit(1);
+}
+
+// ---- 审计日志 ----
 
 async function loadAudit(page) {
     const userFilter = document.getElementById('audit-user-filter').value.trim();
@@ -1130,6 +1146,313 @@ async function loadAudit(page) {
         document.getElementById('audit-next').disabled = data.page >= totalPages;
     } catch (err) {
         console.error('加载审计日志失败:', err);
+    }
+}
+
+function exportAudit() {
+    const userFilter = document.getElementById('audit-user-filter').value.trim();
+    const actionFilter = document.getElementById('audit-action-filter').value;
+    const params = new URLSearchParams();
+    if (userFilter) params.set('user', userFilter);
+    if (actionFilter) params.set('action', actionFilter);
+    const token = getToken();
+    fetch(`/api/audit/export?${params.toString()}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    }).then(resp => {
+        if (!resp.ok) throw new Error('导出失败');
+        return resp.blob();
+    }).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'audit_log.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+    }).catch(err => alert('导出失败: ' + err.message));
+}
+
+// ---- 用户管理 ----
+
+async function loadAdminUsers(page) {
+    const keyword = document.getElementById('admin-user-keyword').value.trim();
+    adminUsersPage = Math.max(1, page);
+
+    try {
+        const params = new URLSearchParams({ page: adminUsersPage, size: 10 });
+        if (keyword) params.set('keyword', keyword);
+        const response = await apiFetch(`/api/admin/users?${params.toString()}`);
+        if (!response.ok) return;
+        const data = await response.json();
+
+        const tbody = document.getElementById('admin-users-tbody');
+        if (!data.items || data.items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="audit-empty">暂无用户</td></tr>';
+        } else {
+            tbody.innerHTML = data.items.map(u => {
+                const locked = u.locked_until ? ' 🔒' : '';
+                const roleBadge = u.role === 'admin'
+                    ? '<span class="action-badge badge-admin">管理员</span>'
+                    : '<span class="action-badge">用户</span>';
+                const status = u.enabled
+                    ? '<span class="status-badge status-on">启用' + locked + '</span>'
+                    : '<span class="status-badge status-off">禁用</span>';
+                const ops = [];
+                if (u.enabled) {
+                    ops.push(`<button class="btn btn-mini" onclick="toggleAdminUser('${u.username}', false)">禁用</button>`);
+                } else {
+                    ops.push(`<button class="btn btn-mini" onclick="toggleAdminUser('${u.username}', true)">启用</button>`);
+                }
+                ops.push(`<button class="btn btn-mini" onclick="resetAdminPassword('${u.username}')">重置密码</button>`);
+                ops.push(`<button class="btn btn-mini btn-danger" onclick="deleteAdminUser('${u.username}')">删除</button>`);
+                if (u.locked_until) {
+                    ops.push(`<button class="btn btn-mini" onclick="unlockAdminUser('${u.username}')">解锁</button>`);
+                }
+                return `<tr>
+                    <td>${escapeHtml(u.username)}</td>
+                    <td>${escapeHtml(u.display_name)}</td>
+                    <td>${roleBadge}</td>
+                    <td>${status}</td>
+                    <td>${escapeHtml(u.created_at)}</td>
+                    <td class="ops-cell">${ops.join('')}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        const totalPages = Math.max(1, Math.ceil(data.total / data.size));
+        document.getElementById('admin-users-page').textContent =
+            `第 ${data.page} / ${totalPages} 页（共 ${data.total} 人）`;
+    } catch (err) {
+        console.error('加载用户列表失败:', err);
+    }
+}
+
+async function createAdminUser() {
+    const username = document.getElementById('admin-new-username').value.trim();
+    const password = document.getElementById('admin-new-password').value;
+    const display_name = document.getElementById('admin-new-display').value.trim();
+    const role = document.getElementById('admin-new-role').value;
+    if (!username || !password) { alert('请填写用户名和密码'); return; }
+
+    try {
+        const response = await apiFetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, display_name, role }),
+        });
+        const data = await response.json();
+        if (!response.ok) { alert(data.detail || '创建失败'); return; }
+        document.getElementById('admin-new-username').value = '';
+        document.getElementById('admin-new-password').value = '';
+        document.getElementById('admin-new-display').value = '';
+        loadAdminUsers(1);
+    } catch (err) {
+        alert('创建失败: ' + err.message);
+    }
+}
+
+async function toggleAdminUser(username, enabled) {
+    try {
+        const response = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await response.json();
+        if (!response.ok) { alert(data.detail || '操作失败'); return; }
+        loadAdminUsers(adminUsersPage);
+    } catch (err) {
+        alert('操作失败: ' + err.message);
+    }
+}
+
+async function resetAdminPassword(username) {
+    const newPassword = prompt(`为用户 ${username} 设置新密码（至少 6 位）：`);
+    if (newPassword === null) return;
+    if (newPassword.length < 6) { alert('密码长度至少 6 位'); return; }
+    try {
+        const response = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: newPassword }),
+        });
+        const data = await response.json();
+        if (!response.ok) { alert(data.detail || '操作失败'); return; }
+        alert(`已重置 ${username} 的密码`);
+    } catch (err) {
+        alert('操作失败: ' + err.message);
+    }
+}
+
+async function deleteAdminUser(username) {
+    if (!confirm(`确定删除用户 ${username}？其名下知识库将转移给当前管理员。`)) return;
+    try {
+        const response = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+            method: 'DELETE',
+        });
+        const data = await response.json();
+        if (!response.ok) { alert(data.detail || '删除失败'); return; }
+        alert(`已删除 ${username}，转移知识库 ${data.transferred_kbs} 个`);
+        loadAdminUsers(adminUsersPage);
+    } catch (err) {
+        alert('删除失败: ' + err.message);
+    }
+}
+
+async function unlockAdminUser(username) {
+    try {
+        const response = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}/unlock`, {
+            method: 'POST',
+        });
+        const data = await response.json();
+        if (!response.ok) { alert(data.detail || '操作失败'); return; }
+        loadAdminUsers(adminUsersPage);
+    } catch (err) {
+        alert('操作失败: ' + err.message);
+    }
+}
+
+// ---- 知识库配额 ----
+
+async function loadAdminKbs() {
+    try {
+        const response = await apiFetch('/api/admin/knowledge-bases');
+        if (!response.ok) return;
+        const data = await response.json();
+        const tbody = document.getElementById('admin-kbs-tbody');
+        if (!data.collections || data.collections.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="audit-empty">暂无知识库</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.collections.map(kb => {
+            const chunks = `${kb.chunk_count} / <input type="number" class="quota-input" id="quota-chunks-${escapeHtml(kb.name)}" value="${kb.quota_chunks}" title="-1 不限制">`;
+            const docs = `${kb.document_count} / <input type="number" class="quota-input" id="quota-docs-${escapeHtml(kb.name)}" value="${kb.quota_documents}" title="-1 不限制">`;
+            return `<tr>
+                <td>${escapeHtml(kb.name)}</td>
+                <td>${escapeHtml(kb.owner)}</td>
+                <td>${chunks}</td>
+                <td>${docs}</td>
+                <td>${escapeHtml(kb.created_at)}</td>
+                <td class="ops-cell">
+                    <button class="btn btn-mini" onclick="saveKbQuota('${escapeHtml(kb.name)}')">保存配额</button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('加载知识库配额失败:', err);
+    }
+}
+
+async function saveKbQuota(name) {
+    const quota_chunks = parseInt(document.getElementById('quota-chunks-' + name).value, 10);
+    const quota_documents = parseInt(document.getElementById('quota-docs-' + name).value, 10);
+    try {
+        const response = await apiFetch(`/api/admin/knowledge-bases/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quota_chunks, quota_documents }),
+        });
+        const data = await response.json();
+        if (!response.ok) { alert(data.detail || '保存失败'); return; }
+        loadAdminKbs();
+    } catch (err) {
+        alert('保存失败: ' + err.message);
+    }
+}
+
+// ---- 系统配置 ----
+
+const CONFIG_FIELDS = [
+    { section: 'llm', key: 'provider', label: 'LLM 提供商', type: 'select', options: ['ollama', 'openai'] },
+    { section: 'llm', key: 'model', label: 'LLM 模型', type: 'text' },
+    { section: 'llm', key: 'ollama_base_url', label: 'Ollama 地址', type: 'text' },
+    { section: 'llm', key: 'openai_base_url', label: 'OpenAI 地址', type: 'text' },
+    { section: 'llm', key: 'temperature', label: '温度 (0-1)', type: 'number' },
+    { section: 'llm', key: 'max_tokens', label: '最大输出 Token', type: 'number' },
+    { section: 'llm', key: 'openai_api_key', label: 'OpenAI API Key', type: 'password' },
+    { section: 'embedding', key: 'provider', label: '嵌入提供商', type: 'select', options: ['ollama', 'openai'] },
+    { section: 'embedding', key: 'model', label: '嵌入模型', type: 'text' },
+    { section: 'retrieval', key: 'top_k', label: '检索 Top-K', type: 'number' },
+    { section: 'retrieval', key: 'score_threshold', label: '相似度阈值', type: 'number', step: '0.01' },
+    { section: 'retrieval', key: 'hybrid_search', label: '混合检索', type: 'select', options: ['true', 'false'] },
+    { section: 'retrieval', key: 'bm25_weight', label: 'BM25 权重', type: 'number', step: '0.01' },
+    { section: 'reranker', key: 'enabled', label: '重排启用', type: 'select', options: ['true', 'false'] },
+    { section: 'reranker', key: 'top_n', label: '重排 Top-N', type: 'number' },
+    { section: 'query_rewrite', key: 'enabled', label: 'Query 改写', type: 'select', options: ['true', 'false'] },
+    { section: 'agent', key: 'max_iterations', label: 'Agent 最大轮数', type: 'number' },
+    { section: 'document', key: 'chunk_size', label: '分块大小', type: 'number' },
+    { section: 'document', key: 'chunk_overlap', label: '分块重叠', type: 'number' },
+    { section: 'document', key: 'ocr_enabled', label: 'PDF OCR', type: 'select', options: ['true', 'false'] },
+];
+
+async function loadAdminConfig() {
+    try {
+        const response = await apiFetch('/api/admin/config');
+        if (!response.ok) return;
+        adminConfig = (await response.json()).config;
+        const form = document.getElementById('config-form');
+        form.innerHTML = CONFIG_FIELDS.map((f, i) => {
+            const val = (adminConfig[f.section] || {})[f.key];
+            const label = `<label class="config-label" for="cfg-${i}">${f.label}</label>`;
+            let input;
+            if (f.type === 'select') {
+                const opts = f.options.map(o =>
+                    `<option value="${o}" ${String(val) === o ? 'selected' : ''}>${o}</option>`).join('');
+                input = `<select class="filter-input config-input" id="cfg-${i}">${opts}</select>`;
+            } else if (f.type === 'password') {
+                input = `<input class="filter-input config-input" id="cfg-${i}" type="password" placeholder="${val === '****' ? '****（留空保留原值）' : ''}">`;
+            } else if (f.type === 'text') {
+                input = `<input class="filter-input config-input" id="cfg-${i}" type="text" value="${escapeHtml(String(val))}">`;
+            } else {
+                input = `<input class="filter-input config-input" id="cfg-${i}" type="number" step="${f.step || '1'}" value="${val}">`;
+            }
+            return `<div class="config-row">${label}${input}</div>`;
+        }).join('');
+    } catch (err) {
+        console.error('加载配置失败:', err);
+    }
+}
+
+async function saveAdminConfig() {
+    if (!adminConfig) return;
+    const patch = {};
+    CONFIG_FIELDS.forEach((f, i) => {
+        const el = document.getElementById(`cfg-${i}`);
+        if (!el) return;
+        let value;
+        if (f.type === 'select') {
+            value = el.value === 'true' ? true : (el.value === 'false' ? false : el.value);
+        } else if (f.type === 'password') {
+            if (el.value) value = el.value;  // 留空 = 保留原值
+        } else if (f.type === 'text') {
+            value = el.value;
+        } else {
+            value = Number(el.value);
+        }
+        if (value !== undefined) {
+            if (!patch[f.section]) patch[f.section] = {};
+            patch[f.section][f.key] = value;
+        }
+    });
+    try {
+        const response = await apiFetch('/api/admin/config', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+        });
+        const data = await response.json();
+        const msg = document.getElementById('config-msg');
+        if (!response.ok) {
+            msg.textContent = '保存失败: ' + (data.detail || '');
+            msg.className = 'config-msg config-err';
+            return;
+        }
+        adminConfig = data.config;
+        msg.textContent = '已保存并生效';
+        msg.className = 'config-msg config-ok';
+        loadAdminConfig();
+        setTimeout(() => { msg.textContent = ''; }, 3000);
+    } catch (err) {
+        document.getElementById('config-msg').textContent = '保存失败: ' + err.message;
     }
 }
 
