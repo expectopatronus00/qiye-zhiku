@@ -235,16 +235,18 @@ class TestAuditLogger:
 
 class TestDependencies:
     def test_get_current_user_no_auth(self, monkeypatch):
+        from types import SimpleNamespace
         from app.core.security import get_current_user
         monkeypatch.setattr("app.core.security.settings.security.auth_enabled", False)
-        user = get_current_user()  # 无凭据
+        user = get_current_user(SimpleNamespace(state=SimpleNamespace()))  # 无凭据
         assert user.is_admin and user.username == "system"
 
     def test_get_current_user_missing_credential(self, monkeypatch):
+        from types import SimpleNamespace
         from app.core.security import get_current_user
         monkeypatch.setattr("app.core.security.settings.security.auth_enabled", True)
         with pytest.raises(HTTPException) as exc:
-            get_current_user(None)  # 无凭据
+            get_current_user(SimpleNamespace(state=SimpleNamespace()), None)  # 无凭据
         assert exc.value.status_code == 401
 
     def test_require_admin(self):

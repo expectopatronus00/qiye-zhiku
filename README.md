@@ -13,6 +13,7 @@
 
 ## 核心特性
 
+- **生产加固（v1.0）**：统一日志体系（文件轮转 + 请求日志含用户/耗时）、健康检查（`/healthz` 存活 + `/readyz` 就绪依赖探测，LLM 异常自动降级标记）、Docker Compose 一键部署（app + Ollama 编排 + 数据卷持久化）
 - **Agent 模式（v0.9）**：Function Calling 工具调用 + 多步推理（检索知识库/精读文档全文/知识库统计/当前时间），输入区一键切换，回答下方展示可折叠的"推理过程"（每步工具名/参数/耗时/结果），模型不支持工具调用时自动降级普通 RAG
 - **全面 UI 重构（v0.8）**：现代深色科技感设计系统（蓝紫渐变 + 玻璃拟态 + 柔和发光），一键切换浅色主题（记忆偏好 + 跟随系统 + URL 强制）
 - **Mini-Markdown 安全渲染（v0.8）**：回答富文本渲染（列表/表格/代码/引用/标题），纯 DOM 构建零注入风险
@@ -213,11 +214,54 @@ curl -X POST http://localhost:8000/api/auth/register \
 
 API：`POST /api/chat/agent`（body 同普通对话：`{message, collection_name, conversation_id}`）。
 
+### 生产部署（v1.0）
+
+#### Docker Compose 一键部署（推荐）
+
+```bash
+# 1. 准备配置（关键：容器内 Ollama 地址）
+cp config.example.yaml config.yaml
+#    编辑 config.yaml: llm.ollama_base_url: "http://ollama:11434"  ← 指向 compose 内的 ollama 服务
+#    （本机已有 Ollama 时保持 localhost:11434 并删除 compose 中 ollama 服务即可）
+
+# 2. 启动（自动构建镜像 + 拉起 Ollama，等待健康检查通过）
+docker compose up -d
+
+# 3. 首次拉取模型（可选，进入 ollama 容器）
+docker exec -it qiye-zhiku-ollama ollama pull qwen2.5:7b
+docker exec -it qiye-zhiku-ollama ollama pull nomic-embed-text
+
+# 4. 访问 http://localhost:8000
+```
+
+- 编排包含 `app`（本系统，非 root 运行 + 健康检查）与 `ollama`（本地大模型，数据不出域），`app` 等待 `ollama` 健康后才启动
+- 数据全部持久化在 `./data`（上传/向量库/日志/对话/用户库）与 `ollama_models` 卷，`docker compose down` 不丢数据
+- 需要 GPU 加速时取消 `docker-compose.yml` 中 `deploy.resources` 注释（需 NVIDIA Container Toolkit）
+- 也可单独使用 Dockerfile 构建镜像：`docker build -t qiye-zhiku . && docker run -p 8000:8000 -v ./data:/app/data qiye-zhiku`
+
+#### 健康检查
+
+| 端点 | 用途 | 语义 |
+|------|------|------|
+| `GET /healthz` | 存活探针 | 进程活着即 200（K8s/Docker liveness） |
+| `GET /readyz` | 就绪探针 | 探测向量库/数据库/Ollama；全绿 `ready`；仅 LLM 异常 `degraded`（200，文档管理仍可用）；核心依赖失败 `unavailable`（503） |
+| `GET /health` | 兼容端点 | 返回版本与 LLM 状态 |
+
+#### 日志体系
+
+- 应用日志：`data/logs/app.log`（RotatingFileHandler 5MB × 5 轮转），控制台同步输出
+- 访问日志：`data/logs/access.log`（uvicorn access 轮转文件）
+- 请求中间件：每条请求记录方法/路径/状态码/耗时/用户（如 `GET /api/knowledge/collections -> 200 (60ms) user=admin`）
+- `data/logs` 挂载宿主机 `./data`，可直接 `tail -f data/logs/app.log` 观测
+
 ## 项目结构
 
 ```
 qiye-zhiku/
 ├── main.py                 # 应用入口
+├── Dockerfile              # 生产镜像（非 root + 健康检查）
+├── docker-compose.yml      # 一键部署编排（app + Ollama）
+├── .dockerignore           # 构建上下文排除
 ├── config.yaml             # 运行配置
 ├── config.example.yaml     # 配置模板
 ├── requirements.txt        # Python 依赖
@@ -231,6 +275,7 @@ qiye-zhiku/
 │   │   ├── embeddings.py   # 向量嵌入
 │   │   ├── evaluator.py    # RAGAS 评估（忠实度/相关性/召回率，本地裁判）
 │   │   ├── llm.py          # LLM 调用（含 Function Calling / Tools API）
+│   │   ├── logging_setup.py# 统一日志（轮转文件 + 控制台 + 请求中间件，v1.0）
 │   │   ├── reranker.py     # 检索结果重排序（cross-encoder / 启发式）
 │   │   ├── retriever.py    # 检索引擎
 │   │   ├── tools.py        # Agent 工具注册表 + 内置工具集（v0.9）
@@ -238,7 +283,9 @@ qiye-zhiku/
 │   ├── routers/            # API 路由
 │   │   ├── chat.py         # 对话接口（含多轮对话）
 │   │   ├── documents.py    # 文档管理
-│   │   └── knowledge.py    # 知识库管理
+│   │   ├── health.py       # 健康检查（/healthz /readyz，v1.0）
+│   │   ├── knowledge.py    # 知识库管理
+│   │   └── auth.py         # 认证
 │   └── static/             # 前端界面
 │       ├── index.html
 │       ├── css/
@@ -262,6 +309,7 @@ qiye-zhiku/
 | 2026-08-05 | v0.7 | 权限管理：多用户认证（PBKDF2 哈希 + 令牌 + 失败锁定）、知识库属主隔离（存量库自动迁移）、操作审计日志（admin 专属可视化面板）、登录页/权限前端，安全模块单元测试 24 项，e2e 权限链路 16 项全过 |
 | 2026-08-05 | v0.8 | 高级 UI：全面重构设计系统（深色默认 + 浅色切换 + 渐变/玻璃拟态/发光）、Mini-Markdown 安全渲染、来源卡片 + 引用 [n] 点击高亮、文档预览面板（按原文顺序 + 块类型徽章）、对话导出 Markdown、`?conv=` 深链恢复、内网免登录直入（`/api/auth/status` 自适应）、对话消息实时落盘（重启不丢），全量单元测试 84 项 + e2e 16 项全过，截图视觉验证（深浅主题/登录页/欢迎页/对话视图） |
 | 2026-08-07 | v0.9 | Agent 模式：Function Calling 双通道（Ollama tools / OpenAI tools 自动适配 arguments 格式差异）、工具注册表（装饰器 + 签名自动生成 schema，依赖注入不暴露给模型）、内置 5 工具（检索/文档精读/库列表/库统计/时间）、Agent 多步推理循环（失败重试 + 迭代上限 + 上限强制总结）、前端 ⚡ Agent 模式开关 + 可折叠推理过程可视化（工具名/参数/耗时/结果 + 来源文件徽章）、模型不支持工具调用自动降级普通 RAG、对话落盘含工具步骤（深链恢复还原），修复 Ollama 回填消息 400 与 `can_access(None)` 崩溃，全量单元测试 102 项全过，真机验证工具调用全链路 + 截图验证折叠/展开态 |
+| 2026-08-07 | v1.0 | 生产加固：统一日志体系（app.log/access.log 轮转 5MB×5 + 请求日志中间件含用户/耗时）、健康检查（/healthz 存活 + /readyz 依赖探测：向量库/数据库/Ollama 短超时，全绿 ready、LLM 异常 degraded 不阻塞、核心失败 503 + /health 兼容）、Docker Compose 一键部署（app+Ollama 编排、healthcheck 依赖启动、非 root 运行、数据卷持久化、GPU 可选注释）、Ollama 地址可配置（llm.ollama_base_url，容器部署必需），全量单元测试 108 项全过，真机验证健康端点/日志轮转/请求日志带用户名 |
 | ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景

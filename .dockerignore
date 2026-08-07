@@ -1,0 +1,17 @@
+# 构建上下文排除
+.git
+.gitignore
+.github
+data/
+tests/
+docs/
+*.log
+*.md.bak
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.trash_dev/
+Dockerfile
+docker-compose.yml
+.dockerignore
+start.bat

@@ -415,16 +415,19 @@ _bearer = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> User:
     """当前登录用户；auth_enabled=false 时返回内置 system 管理员"""
     if not settings.security.auth_enabled:
-        return User(username="system", role="admin", display_name="系统(免认证)")
-    if credentials is None:
+        user = User(username="system", role="admin", display_name="系统(免认证)")
+    elif credentials is None:
         raise HTTPException(status_code=401, detail="未登录或令牌缺失")
-    user = get_user_manager().get_user_by_token(credentials.credentials)
-    if user is None:
-        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+    else:
+        user = get_user_manager().get_user_by_token(credentials.credentials)
+        if user is None:
+            raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+    request.state.username = user.username  # 供请求日志中间件记录
     return user
 
 

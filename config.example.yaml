@@ -13,6 +13,8 @@ llm:
   provider: "ollama"
   # Ollama 模型名
   model: "qwen2.5:7b"
+  # Ollama 服务地址（Docker Compose 部署时改为 http://ollama:11434）
+  ollama_base_url: "http://localhost:11434"
   # OpenAI 配置（provider 为 openai 时使用）
   openai_api_key: ""
   openai_base_url: "https://api.openai.com/v1"

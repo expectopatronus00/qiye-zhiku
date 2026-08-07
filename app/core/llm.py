@@ -72,7 +72,7 @@ class LLMService:
         """Ollama 同步对话"""
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                "http://localhost:11434/api/chat",
+                f"{self.ollama_base_url}/api/chat",
                 json={
                     "model": self.model,
                     "messages": messages,
@@ -92,7 +92,7 @@ class LLMService:
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
-                "http://localhost:11434/api/chat",
+                f"{self.ollama_base_url}/api/chat",
                 json={
                     "model": self.model,
                     "messages": messages,
@@ -130,7 +130,7 @@ class LLMService:
         import json
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                "http://localhost:11434/api/chat",
+                f"{self.ollama_base_url}/api/chat",
                 json={
                     "model": self.model,
                     "messages": messages,

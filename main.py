@@ -1,4 +1,4 @@
-"""企业智库 RAG 问答系统 - 应用入口 (v0.7 权限管理)"""
+"""企业智库 RAG 问答系统 - 应用入口 (v1.0 生产加固)"""
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -6,17 +6,28 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.logging_setup import get_logger, request_log_middleware, setup_logging
 from app.core.vectorstore import VectorStore
 from app.core.security import get_audit_logger, get_kb_registry, get_user_manager
-from app.routers import auth, audit, chat, documents, knowledge
+from app.routers import auth, audit, chat, documents, health, knowledge
+
+APP_VERSION = "1.0.0"
+logger = get_logger("main")
+
+# 统一日志（文件轮转 + 控制台），启动即生效
+setup_logging(settings.data.logs)
 
 app = FastAPI(
     title="企业智库 RAG 问答系统",
     description="面向央企 AI 场景的私有化知识库问答引擎",
-    version="0.8.0",
+    version=APP_VERSION,
 )
 
+# 请求日志中间件（方法/路径/状态/耗时/用户）
+app.middleware("http")(request_log_middleware)
+
 # 注册路由
+app.include_router(health.router, tags=["健康检查"])  # /healthz /readyz /health
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(audit.router, prefix="/api/audit", tags=["审计"])
 app.include_router(chat.router, prefix="/api/chat", tags=["对话"])
@@ -48,12 +59,6 @@ async def startup():
 async def index():
     """返回前端页面"""
     return FileResponse(str(static_dir / "index.html"))
-
-
-@app.get("/health")
-async def health():
-    """健康检查"""
-    return {"status": "ok", "version": "0.7.0"}
 
 
 def main():

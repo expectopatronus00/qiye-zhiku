@@ -193,16 +193,22 @@ class TestAgentRun:
         assert result["steps"][0]["tool_name"] == "search_knowledge_base"
         assert result["steps"][0]["arguments"] == {"query": "阈值", "top_k": 2}
 
-    def test_assistant_tool_message_json_arguments(self, run):
-        """回填消息的 arguments 必须为 JSON 字符串（OpenAI 规范）"""
+    def test_assistant_tool_message_json_arguments(self, run, monkeypatch):
+        """回填消息 arguments 格式随 provider：OpenAI=JSON 字符串，Ollama=对象"""
+        import json
         resp = LLMResponse("", [LLMToolCall("search_knowledge_base", {"query": "阈值"})])
+
+        monkeypatch.setattr(run.llm, "provider", "openai")
         msg = run._assistant_tool_message(resp)
         assert msg["role"] == "assistant"
         tc = msg["tool_calls"][0]["function"]
         assert tc["name"] == "search_knowledge_base"
         assert isinstance(tc["arguments"], str)
-        import json
         assert json.loads(tc["arguments"]) == {"query": "阈值"}
+
+        monkeypatch.setattr(run.llm, "provider", "ollama")
+        msg2 = run._assistant_tool_message(resp)
+        assert msg2["tool_calls"][0]["function"]["arguments"] == {"query": "阈值"}
 
     def test_summarize_result_truncates(self, run):
         long = {"data": "x" * 3000}

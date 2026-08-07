@@ -14,6 +14,7 @@ class ServerConfig(BaseModel):
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     model: str = "qwen2.5:7b"
+    ollama_base_url: str = "http://localhost:11434"  # Ollama 服务地址（容器部署时指向 ollama 服务）
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     temperature: float = 0.3

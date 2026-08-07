@@ -1,0 +1,62 @@
+# 企业智库 RAG 问答系统 - Docker Compose 一键部署 (v1.0)
+# 用法: docker compose up -d   （首次启动后访问 http://localhost:8000）
+#
+# 需要 GPU 加速时（NVIDIA 容器运行时）取消下面 app.llm 的 deploy 注释
+services:
+  app:
+    build: .
+    container_name: qiye-zhiku
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      # 数据持久化（上传/向量库/日志/对话/用户库）
+      - ./data:/app/data
+      # 生产配置挂载（config.yaml 中 llm.ollama_base_url 指向 ollama 服务）
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    # GPU 加速（NVIDIA 容器运行时）:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # 本地大模型服务（数据不出域）
+  ollama:
+    image: ollama/ollama:latest
+    container_name: qiye-zhiku-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 5
+    # GPU 加速:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_models:
