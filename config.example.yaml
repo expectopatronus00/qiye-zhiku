@@ -6,6 +6,10 @@ server:
   host: "0.0.0.0"
   port: 8000
   debug: false
+  # HTTPS 一键启用（v1.4 等保）：配置证书路径后服务以 HTTPS 运行
+  # 自签证书生成：python scripts/gen_self_signed_cert.py（生产建议使用 CA 签发证书）
+  ssl_certfile: ""   # 如 ./certs/server.crt
+  ssl_keyfile: ""    # 如 ./certs/server.key
 
 # LLM 配置
 llm:
@@ -155,6 +159,13 @@ security:
   admin_password: ""
   # 连续失败锁定次数（0 表示不锁定）
   max_login_attempts: 5
+  # ---- 数据安全 (v1.4 等保 2.0) ----
+  # 敏感信息脱敏（上传入库 + 问答输出双链路；覆盖手机号/身份证/银行卡/API Key/长Token/邮箱）
+  mask_sensitive: true
+  # 同一用户连续登录失败达到该次数触发 security.alert 告警审计（0 关闭）
+  login_alert_threshold: 3
+  # 密码最小长度（等保三级 ≥8 位；同时要求大写/小写/数字/特殊字符至少 3 类、禁弱口令）
+  password_min_length: 8
 
 # Agent 模式配置 (v0.9)
 agent:

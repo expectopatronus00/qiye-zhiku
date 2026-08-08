@@ -9,6 +9,9 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+    # ---- HTTPS (v1.4 等保 2.0) ----
+    ssl_certfile: str = ""   # 证书路径（如 ./certs/server.crt），非空即启用 HTTPS
+    ssl_keyfile: str = ""    # 私钥路径（如 ./certs/server.key）
 
 
 # 国产化 provider 白名单 (v1.3 信创适配)
@@ -112,6 +115,10 @@ class SecurityConfig(BaseModel):
     admin_username: str = "admin"
     admin_password: str = ""         # 空则首次启动生成随机密码并写入 data/admin_credentials.txt
     max_login_attempts: int = 5      # 连续失败锁定次数（0 表示不锁定）
+    # ---- 数据安全 (v1.4) ----
+    mask_sensitive: bool = True      # 敏感信息脱敏（上传入库 + 输出兜底双链路）
+    login_alert_threshold: int = 3   # 同一用户连续登录失败达到该次数触发告警（security.alert 审计）
+    password_min_length: int = 8     # 密码最小长度（等保 2.0 三级要求 ≥8 位且含复杂度）
 
 
 class AgentConfig(BaseModel):

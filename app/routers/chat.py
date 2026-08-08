@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from fastapi.responses import StreamingResponse
 
+from app.core.config import settings
 from app.core.llm import LLMService
 from app.core.retriever import Retriever
 from app.core.conversation import conversation_manager
@@ -236,6 +237,10 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
     messages, sources, rewritten_query, retrieval_debug = await _prepare_rag_messages(llm, conv, request)
 
     answer = await llm.chat(messages)
+    # v1.4 输出链路脱敏（防 LLM 幻觉生成敏感信息）
+    if settings.security.mask_sensitive:
+        from app.core.masker import mask_sensitive
+        answer = mask_sensitive(answer)
 
     # 记录助手回复
     msg = conv.add_message("assistant", answer, sources=sources)
@@ -268,11 +273,19 @@ async def chat_stream(request: ChatRequest, user: User = Depends(get_current_use
 
     async def generate():
         async for chunk in llm.chat_stream(messages):
+            # v1.4 输出链路脱敏（块级兜底；跨块号码由落库时二次脱敏保证）
+            if settings.security.mask_sensitive:
+                from app.core.masker import mask_sensitive
+                chunk = mask_sensitive(chunk)
             full_response.append(chunk)
             yield f"data: {chunk}\n\n"
 
-        # 流结束后保存助手回复
-        conv.add_message("assistant", "".join(full_response), sources=sources)
+        # 流结束后保存助手回复（全量二次脱敏，覆盖跨块号码）
+        final_answer = "".join(full_response)
+        if settings.security.mask_sensitive:
+            from app.core.masker import mask_sensitive
+            final_answer = mask_sensitive(final_answer)
+        conv.add_message("assistant", final_answer, sources=sources)
         conversation_manager.save(conv)
         get_audit_logger().log(user.username, "chat.stream", conv.collection_name,
                                f"对话 {conv.id}，问题: {request.message[:80]}")
@@ -327,6 +340,9 @@ async def chat_agent(request: AgentRequest, user: User = Depends(get_current_use
                 conv.messages.pop()
             messages, sources, rewritten, _debug = await _prepare_rag_messages(llm, conv, rag_request)
             answer = await llm.chat(messages)
+            if settings.security.mask_sensitive:
+                from app.core.masker import mask_sensitive
+                answer = mask_sensitive(answer)
             result = {"answer": answer, "steps": [], "source_files": [],
                       "fallback": True, "reason": str(exc)}
         except Exception:

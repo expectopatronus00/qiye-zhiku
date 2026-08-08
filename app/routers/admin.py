@@ -149,7 +149,7 @@ def _kb_usage(name: str) -> dict:
     chunk_count = vs.count()
     doc_count = 0
     try:
-        metas = vs.collection.get(include=["metadatas"]).get("metadatas") or []
+        metas = vs.get_metadatas()
         doc_count = len({m.get("filename", "unknown") for m in metas})
     except Exception:
         pass

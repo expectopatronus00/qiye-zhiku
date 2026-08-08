@@ -39,66 +39,66 @@ def audit(db: _DB) -> AuditLogger:
 
 class TestUserAdminCore:
     def test_admin_create_user_with_role(self, um: UserManager):
-        user = um.admin_create_user("zhang", "pass123", "张工", role="admin")
+        user = um.admin_create_user("zhang", "Abc@12345", "张工", role="admin")
         assert user.role == "admin"
         row = um.get_user("zhang")
         assert row["role"] == "admin" and row["enabled"] == 1
 
     def test_admin_create_rejects_bad_role(self, um: UserManager):
         with pytest.raises(ValueError):
-            um.admin_create_user("li", "pass123", role="superuser")
+            um.admin_create_user("li", "Abc@12345", role="superuser")
 
     def test_disable_blocks_login_and_revokes_token(self, um: UserManager):
-        um.register("wang", "pass123", "王工")
-        _, token = um.login("wang", "pass123")
+        um.register("wang", "Abc@12345", "王工")
+        _, token = um.login("wang", "Abc@12345")
         assert um.get_user_by_token(token) is not None
         um.set_enabled("wang", False)
         # 令牌立即失效
         assert um.get_user_by_token(token) is None
         # 登录被拒
-        user, err = um.login("wang", "pass123")
+        user, err = um.login("wang", "Abc@12345")
         assert user is None and "禁用" in err
 
     def test_enable_restores_login(self, um: UserManager):
-        um.register("zhao", "pass123")
+        um.register("zhao", "Abc@12345")
         um.set_enabled("zhao", False)
         um.set_enabled("zhao", True)
-        user, token = um.login("zhao", "pass123")
+        user, token = um.login("zhao", "Abc@12345")
         assert user is not None and token
 
     def test_reset_password_revokes_tokens(self, um: UserManager):
-        um.register("qian", "pass123")
-        _, token = um.login("qian", "pass123")
-        um.reset_password("qian", "newpass456")
+        um.register("qian", "Abc@12345")
+        _, token = um.login("qian", "Abc@12345")
+        um.reset_password("qian", "New@67890")
         assert um.get_user_by_token(token) is None
-        user, err = um.login("qian", "pass123")
+        user, err = um.login("qian", "Abc@12345")
         assert user is None
-        user, _ = um.login("qian", "newpass456")
+        user, _ = um.login("qian", "New@67890")
         assert user is not None
 
     def test_reset_password_too_short(self, um: UserManager):
-        um.register("sun", "pass123")
+        um.register("sun", "Abc@12345")
         with pytest.raises(ValueError):
             um.reset_password("sun", "123")
 
     def test_unlock_clears_lockout(self, um: UserManager):
-        um.register("zhou", "pass123")
+        um.register("zhou", "Abc@12345")
         for _ in range(um.max_attempts):
             um.login("zhou", "bad")
-        user, err = um.login("zhou", "pass123")
+        user, err = um.login("zhou", "Abc@12345")
         assert user is None and "锁定" in err
         um.unlock("zhou")
-        user, _ = um.login("zhou", "pass123")
+        user, _ = um.login("zhou", "Abc@12345")
         assert user is not None
 
     def test_delete_user(self, um: UserManager):
-        um.register("wu", "pass123")
+        um.register("wu", "Abc@12345")
         um.delete_user("wu")
         assert um.get_user("wu") is None
 
     def test_list_users_keyword(self, um: UserManager):
-        um.register("alice", "pass123", "爱丽丝")
-        um.register("bob", "pass123", "鲍勃")
+        um.register("alice", "Abc@12345", "爱丽丝")
+        um.register("bob", "Abc@12345", "鲍勃")
         result = um.list_users(keyword="爱丽")
         assert result["total"] == 1 and result["items"][0]["username"] == "alice"
         # 列表不含敏感字段

@@ -68,11 +68,11 @@ class TestPasswordHash:
 
 class TestUserManager:
     def test_register_login_me_logout(self, um: UserManager):
-        user = um.register("alice", "pass123", "爱丽丝")
+        user = um.register("alice", "Abc@12345", "爱丽丝")
         assert user.username == "alice"
         assert user.role == "user"
 
-        ok_user, token = um.login("alice", "pass123")
+        ok_user, token = um.login("alice", "Abc@12345")
         assert ok_user is not None and token
 
         # 令牌有效
@@ -85,24 +85,24 @@ class TestUserManager:
 
     def test_register_validation(self, um: UserManager):
         with pytest.raises(ValueError):
-            um.register("a", "pass123")              # 太短
+            um.register("a", "Abc@12345")              # 太短
         with pytest.raises(ValueError):
-            um.register("bad name!", "pass123")      # 非法字符
+            um.register("bad name!", "Abc@12345")      # 非法字符
         with pytest.raises(ValueError):
             um.register("alice", "123")              # 密码过短
         with pytest.raises(ValueError):
-            um.register("admin", "pass123")          # 保留名（默认 admin）
-        um.register("bob", "pass123")
+            um.register("admin", "Abc@12345")          # 保留名（默认 admin）
+        um.register("bob", "Abc@12345")
         with pytest.raises(ValueError):
-            um.register("bob", "pass123")            # 重复
+            um.register("bob", "Abc@12345")            # 重复
 
     def test_wrong_password(self, um: UserManager):
-        um.register("carol", "pass123")
+        um.register("carol", "Abc@12345")
         user, err = um.login("carol", "wrong")
         assert user is None and err
 
     def test_lockout_after_max_attempts(self, um: UserManager):
-        um.register("dave", "pass123")
+        um.register("dave", "Abc@12345")
         # 前 max_attempts-1 次失败
         for _ in range(um.max_attempts - 1):
             um.login("dave", "bad")
@@ -110,21 +110,21 @@ class TestUserManager:
         user, err = um.login("dave", "bad")
         assert user is None and "锁定" in err
         # 锁定期间即使密码正确也拒绝
-        user, err = um.login("dave", "pass123")
+        user, err = um.login("dave", "Abc@12345")
         assert user is None and "锁定" in err
 
     def test_no_lockout_when_disabled(self, db: _DB, monkeypatch):
         monkeypatch.setattr("app.core.security.settings.security.max_login_attempts", 0)
         um = UserManager(db)
-        um.register("erin", "pass123")
+        um.register("erin", "Abc@12345")
         for _ in range(10):
             um.login("erin", "bad")   # 不锁定
-        user, token = um.login("erin", "pass123")
+        user, token = um.login("erin", "Abc@12345")
         assert user is not None and token
 
     def test_token_expiry(self, um: UserManager, monkeypatch):
-        um.register("frank", "pass123")
-        _, token = um.login("frank", "pass123")
+        um.register("frank", "Abc@12345")
+        _, token = um.login("frank", "Abc@12345")
         # 模拟过期
         future_ts = time.strftime(
             "%Y-%m-%d %H:%M:%S",
@@ -133,13 +133,13 @@ class TestUserManager:
         assert um.get_user_by_token(token) is None
 
     def test_change_password(self, um: UserManager):
-        um.register("grace", "oldpass")
-        ok, msg = um.change_password("grace", "oldpass", "newpass")
+        um.register("grace", "Old@12345")
+        ok, msg = um.change_password("grace", "Old@12345", "New@12345")
         assert ok and not msg
-        user, token = um.login("grace", "newpass")
+        user, token = um.login("grace", "New@12345")
         assert user is not None
         # 原密码错误
-        ok, msg = um.change_password("grace", "wrong", "x12345")
+        ok, msg = um.change_password("grace", "wrong", "Xx@12345")
         assert not ok and "原密码" in msg
 
     def test_bootstrap_admin(self, um: UserManager):

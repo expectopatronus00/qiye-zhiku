@@ -140,26 +140,20 @@ class Retriever:
         except ImportError:
             return []
 
-        # 获取所有文档
-        all_docs = self.vectorstore.collection.get(
-            include=["documents", "metadatas"]
-        )
+        # 获取所有文档（跨后端通用协议方法）
+        all_docs = self.vectorstore.get_all_documents()
 
-        if not all_docs["documents"]:
+        if not all_docs:
             return []
 
         # 中文分词
-        tokenized_corpus = [_tokenize(doc) for doc in all_docs["documents"]]
+        tokenized_corpus = [_tokenize(doc["content"]) for doc in all_docs]
         tokenized_query = _tokenize(query)
 
         # 过滤空文档
         valid_pairs = [
-            (tok, meta, content)
-            for tok, meta, content in zip(
-                tokenized_corpus,
-                all_docs["metadatas"],
-                all_docs["documents"],
-            )
+            (tok, doc["metadata"], doc["content"])
+            for tok, doc in zip(tokenized_corpus, all_docs)
             if tok
         ]
         if not valid_pairs:

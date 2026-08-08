@@ -34,6 +34,18 @@ class BaseVectorStore:
         """向量相似度搜索，返回 [{content, metadata, distance, score}]"""
         raise NotImplementedError
 
+    def get_metadatas(self) -> list[dict]:
+        """返回集合内全部 metadata（配额统计/文档列表用，跨后端通用）"""
+        raise NotImplementedError
+
+    def get_all_documents(self) -> list[dict]:
+        """返回集合内全部 [{id, content, metadata}]（BM25 全量检索用）"""
+        raise NotImplementedError
+
+    def get_documents_by_metadata(self, where: dict) -> list[dict]:
+        """按 metadata 过滤返回 [{id, content, metadata}]（文档精读/预览用）"""
+        raise NotImplementedError
+
     def delete_collection(self):
         """删除当前集合"""
         raise NotImplementedError
@@ -101,6 +113,29 @@ class ChromaVectorStore(BaseVectorStore):
                     "score": 1 - results["distances"][0][i],  # cosine distance -> similarity
                 })
         return docs
+
+    def get_metadatas(self) -> list[dict]:
+        """返回集合内全部 metadata"""
+        res = self.collection.get(include=["metadatas"])
+        return list(res.get("metadatas") or [])
+
+    def get_all_documents(self) -> list[dict]:
+        """返回集合内全部 [{id, content, metadata}]"""
+        res = self.collection.get(include=["documents", "metadatas"])
+        return [
+            {"id": res["ids"][i], "content": content,
+             "metadata": (res.get("metadatas") or [])[i] if i < len(res.get("metadatas") or []) else {}}
+            for i, content in enumerate(res.get("documents") or [])
+        ]
+
+    def get_documents_by_metadata(self, where: dict) -> list[dict]:
+        """按 metadata 过滤返回 [{id, content, metadata}]"""
+        res = self.collection.get(where=where, include=["documents", "metadatas"])
+        return [
+            {"id": res["ids"][i], "content": content,
+             "metadata": (res.get("metadatas") or [])[i] if i < len(res.get("metadatas") or []) else {}}
+            for i, content in enumerate(res.get("documents") or [])
+        ]
 
     def delete_collection(self):
         """删除当前集合"""
@@ -187,6 +222,38 @@ class MilvusVectorStore(BaseVectorStore):
                 "score": 1 - distance,
             })
         return docs
+
+    @staticmethod
+    def _parse_rows(rows: list[dict]) -> list[dict]:
+        """Milvus 查询行 → 统一 [{id, content, metadata}]（metadata JSON 反序列化）"""
+        docs = []
+        for r in rows or []:
+            try:
+                metadata = json.loads(r.get("metadata") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            docs.append({"id": r.get("id"), "content": r.get("content", ""), "metadata": metadata})
+        return docs
+
+    def get_metadatas(self) -> list[dict]:
+        """返回集合内全部 metadata"""
+        rows = self.client.query(self.collection_name, filter="", output_fields=["metadata"])
+        return [d["metadata"] for d in self._parse_rows(rows)]
+
+    def get_all_documents(self) -> list[dict]:
+        """返回集合内全部 [{id, content, metadata}]"""
+        rows = self.client.query(self.collection_name, filter="",
+                                 output_fields=["id", "content", "metadata"])
+        return self._parse_rows(rows)
+
+    def get_documents_by_metadata(self, where: dict) -> list[dict]:
+        """按 metadata 过滤（Milvus 中 metadata 为 JSON 串，Python 侧过滤）"""
+        rows = self.client.query(self.collection_name, filter="",
+                                 output_fields=["id", "content", "metadata"])
+        docs = self._parse_rows(rows)
+        if not where:
+            return docs
+        return [d for d in docs if all(d["metadata"].get(k) == v for k, v in where.items())]
 
     def delete_collection(self):
         """删除当前集合"""

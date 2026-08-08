@@ -165,30 +165,28 @@ async def preview_document(filename: str, collection: str = "default", user=None
     require_kb_access(collection, user)
     vectorstore = get_vector_store(collection_name=collection)
     try:
-        result = vectorstore.collection.get(where={"filename": filename},
-                                            include=["documents", "metadatas"])
+        result = vectorstore.get_documents_by_metadata({"filename": filename})
     except Exception:
         return {"error": f"文档 '{filename}' 不存在于知识库 '{collection}'"}
 
-    ids, docs = result.get("ids", []), result.get("documents", []) or []
-    metas = result.get("metadatas", []) or []
-    if not docs:
+    if not result:
         return {"error": f"文档 '{filename}' 不存在于知识库 '{collection}'"}
 
-    def _sort_key(id_: str) -> int:
+    def _sort_key(doc: dict) -> int:
         try:
-            return int(id_.rsplit("_", 1)[1])
+            return int(doc["id"].rsplit("_", 1)[1])
         except (ValueError, IndexError):
             return 0
 
-    ordered = sorted(zip(ids, docs, metas), key=lambda x: _sort_key(x[0]))
+    ordered = sorted(result, key=_sort_key)
     return {
         "filename": filename,
         "collection": collection,
         "chunks_count": len(ordered),
         "chunks": [
-            {"block_type": (m or {}).get("block_type", "text"), "content": d[:2000]}
-            for _, d, m in ordered
+            {"block_type": (d["metadata"] or {}).get("block_type", "text"),
+             "content": d["content"][:2000]}
+            for d in ordered
         ],
     }
 
@@ -225,11 +223,10 @@ async def knowledge_base_stats(collection: str = "default", user=None) -> dict:
     require_kb_access(collection, user)
     vectorstore = get_vector_store(collection_name=collection)
     try:
-        data = vectorstore.collection.get(include=["metadatas"])
+        metas = vectorstore.get_metadatas()
     except Exception:
         return {"error": f"知识库 '{collection}' 不存在或无数据"}
 
-    metas = data.get("metadatas", []) or []
     filenames: dict[str, int] = {}
     for m in metas:
         fname = (m or {}).get("filename", "未知")

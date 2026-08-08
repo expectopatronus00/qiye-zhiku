@@ -77,6 +77,12 @@ async def upload_document(
         )
         sub_chunks = splitter.split(chunks)
 
+        # v1.4 上传链路脱敏：向量库内不落明文（手机号/身份证/银行卡/密钥等）
+        if settings.security.mask_sensitive:
+            from app.core.masker import mask_sensitive
+            for c in sub_chunks:
+                c.content = mask_sensitive(c.content)
+
         # v1.1 配额校验（块数 + 文档数，-1 表示不限制）
         registry = get_kb_registry()
         kb = registry.get(collection_name)
@@ -85,8 +91,7 @@ async def upload_document(
         doc_count = 0
         if kb is not None and (kb.quota_chunks >= 0 or kb.quota_documents >= 0):
             try:
-                metas = vectorstore.collection.get(
-                    include=["metadatas"]).get("metadatas") or []
+                metas = vectorstore.get_metadatas()
                 doc_count = len({m.get("filename", "unknown") for m in metas})
             except Exception:
                 pass
@@ -151,10 +156,10 @@ async def list_documents(
     total = vectorstore.count()
 
     # 获取所有文档的元数据
-    all_docs = vectorstore.collection.get(include=["metadatas"])
+    metas = vectorstore.get_metadatas()
     filenames = list(set(
         meta.get("filename", "unknown")
-        for meta in (all_docs["metadatas"] or [])
+        for meta in metas
     ))
 
     return DocumentListResponse(
@@ -176,27 +181,21 @@ async def preview_document(
 
     try:
         # 按 filename 过滤查询全部块
-        result = vectorstore.collection.get(
-            where={"filename": filename},
-            include=["documents", "metadatas"],
-        )
+        result = vectorstore.get_documents_by_metadata({"filename": filename})
     except Exception:
         raise HTTPException(status_code=404, detail=f"文档 '{filename}' 不存在")
 
-    ids = result.get("ids") or []
-    docs = result.get("documents") or []
-    metas = result.get("metadatas") or []
-    if not ids:
+    if not result:
         raise HTTPException(status_code=404, detail=f"文档 '{filename}' 不存在")
 
     # 按 id 中的序号排序（{file_id}_{index}），保证原文顺序
-    def _sort_key(id_: str) -> int:
+    def _sort_key(pair: tuple) -> int:
         try:
-            return int(id_.rsplit("_", 1)[1])
+            return int(pair[0].rsplit("_", 1)[1])
         except (ValueError, IndexError):
             return 0
 
-    pairs = sorted(zip(ids, docs, metas), key=lambda x: _sort_key(x[0]))
+    pairs = sorted([(d["id"], d["content"], d["metadata"]) for d in result], key=_sort_key)
     chunks = [
         {
             "type": (meta or {}).get("block_type", "text"),

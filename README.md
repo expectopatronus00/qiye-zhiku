@@ -13,6 +13,7 @@
 
 ## 核心特性
 
+- **数据安全与等保（v1.4）**：敏感信息脱敏双链路（上传文档入库前 + 问答输出兜底，覆盖手机号/身份证/银行卡/API Key/长 Token/邮箱 6 类规则，保留头尾可追溯）、密码强度策略（最小长度 8 位 + 大小写/数字/特殊字符至少 3 类 + 弱口令黑名单 + 禁含用户名 + 改密禁同原密码，注册/改密/重置全入口生效）、登录失败告警（连续失败达阈值触发 `security.alert` 审计 + WARNING 日志，与锁定机制联动防刷屏）、HTTPS 一键启用（`server.ssl_certfile/ssl_keyfile` 配置即切换，`scripts/gen_self_signed_cert.py` 自签证书脚本）、等保 2.0 三级自查清单（`docs/dengbao-checklist.md`：十类控制项对照表 + 快速验证命令）
 - **信创适配（v1.3）**：国产 GPU 推理 provider 即配即用（昇腾 CANN / 寒武纪 MLU / 摩尔线程，均走 OpenAI 兼容协议，provider 白名单校验 + 管理台热更新支持）、Milvus 向量库后端（统一 `get_vector_store` 工厂按配置路由，业务层无感知切换，metadata JSON 序列化落库）、x86_64 + arm64 双架构镜像（`scripts/build_dual_arch.sh` 一键 buildx 构建推送，鲲鹏/飞腾可用）、麒麟 V10 / 统信 UOS 部署手册（`docs/xinchuang-deploy.md`：二进制 + Docker 双形态、systemd 托管、昇腾 vLLM-Ascend 接入示例、验收清单）
 - **检索效果工程（v1.2）**：标准 RRF 融合（`w_v/(k+rank_v) + w_b/(k+rank_b)`，k=60 替代原简化加权，双路命中显著提分）、检索诊断面板（回答下方可折叠展示召回路径：向量/BM25 各自排名与得分 + 融合分 + 耗时）、用户反馈闭环（每条回答可 👍/👎 + 补充原因与期望回答，落库可查）、黄金评测集一键回归（`eval/run_regression.py`：hit@5/MRR/top1，混合 vs 纯向量对比，基线自动保存对比，点踩反馈一键回流评测集）
 - **系统管理后台（v1.1）**：管理控制台 5-Tab——审计日志（过滤/分页/CSV 导出）、用户管理（代建/禁用启用/重置密码/解锁/删除，禁用即时吊销令牌，删除用户知识库自动转移管理员）、知识库配额（块数/文档数上限，超限上传 403，-1 不限）、系统配置（LLM/检索/重排等热更新并写回 config.yaml，密钥脱敏不回显）、用户反馈（列表筛选 + 导出回流评测集）
@@ -316,6 +317,7 @@ qiye-zhiku/
 | 2026-08-07 | v1.1 | 系统管理后台：管理控制台 4-Tab（审计日志过滤/分页/CSV 导出、用户管理代建/禁用启用/重置密码/解锁/删除、知识库配额块数+文档数上限、系统配置热更新写回 config.yaml 密钥脱敏）、用户禁用即时吊销令牌（存量库自动迁移 users.enabled / knowledge_bases.quota_*）、删除用户名下知识库自动转移管理员、上传超配额 403（业务异常不再包 500）、前端管理台入口仅管理员可见，全量单元测试 129 项全过，真机验证 12 项管理链路 + 上传配额 403 + 4-Tab 截图 |
 | 2026-08-07 | v1.2 | 检索效果工程：标准 RRF 融合（k=60 + 可调 BM25 权重，双路命中提分，旧简化加权升级）、检索诊断数据（每次检索输出各路径排名/得分/融合分/耗时，前端"检索详情"折叠面板可视化）、用户反馈闭环（消息 ID 锚点、👍/👎 + 原因 + 期望回答落库、管理台"用户反馈"Tab 筛选 + 一键导出回流评测集）、黄金评测集一键回归（eval/run_regression.py：hit@5/MRR/top1，混合 vs 纯向量对比，基线自动保存），修复 LLMService 缺失 ollama_base_url 属性隐藏 bug，全量单元测试 145 项全过，真机验证 11 项反馈链路 + 回归对比 + 前端截图 |
 | 2026-08-08 | v1.3 | 信创适配：国产 GPU provider 即配即用（ascend/cambricon/mthreads 走 OpenAI 兼容协议，provider 白名单校验 + 管理台热更新，无 api_key 自动省略鉴权头）、向量库抽象层（get_vector_store 工厂按 vectorstore.type 路由，Chroma 保持 + 新增 Milvus 后端：COSINE/字符串主键自动建集合、metadata JSON 序列化、distance→score 统一转换，8 处调用点全迁移）、x86_64+arm64 双架构镜像（Dockerfile 多平台注释 + scripts/build_dual_arch.sh buildx 一键构建推送）、麒麟 V10/统信 UOS 部署手册（docs/xinchuang-deploy.md：二进制+systemd+Docker 双形态、昇腾 vLLM-Ascend 接入示例、Milvus 部署、验收清单）、config.example.yaml 同步新字段，修复嵌入服务硬编码 localhost（改走 llm.ollama_base_url，容器部署时嵌入才连得上 Ollama），全量单元测试 176 项全过（新增 31 项 provider 路由/校验 + Milvus 后端 + 工厂），真机验证配置视图含国产字段 + 问答链路 |
+| 2026-08-08 | v1.4 | 数据安全与等保 2.0：敏感信息脱敏双链路（上传入库前 + 输出兜底，completions/stream/agent 三处，6 类规则含手机号/身份证/银行卡/API Key/长Token/邮箱）、密码强度策略（≥8 位 + 3 类复杂度 + 弱口令黑名单 + 禁含用户名 + 改密禁同原密码，注册/改密/重置全入口）、登录失败告警（连续失败达 login_alert_threshold 触发 security.alert 审计 + WARNING，锁定联动防刷屏）、HTTPS 一键启用（server.ssl_* 配置即切换，gen_self_signed_cert.py 自签脚本 cryptography/openssl 双方案）、等保三级自查清单（docs/dengbao-checklist.md 十类控制项）、config.example.yaml 同步、修复 chat.py 缺 settings 导入与 preview_document _sort_key 元组取键 bug，全量测试 206 项全过（新增 30 项），真机验证 14 项（密码策略/告警审计/上传输出脱敏）+ HTTPS 端到端 |
 | ... | ... | 持续迭代中，详见 [ROADMAP.md](ROADMAP.md) |
 
 ## 适用场景

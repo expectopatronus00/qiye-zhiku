@@ -63,11 +63,11 @@ check("admin 看到存量 default 库", s == 200 and "default" in names, f"-> {s
 check("default 库归属 admin", names.get("default", {}).get("owner") == "admin", f"-> {names.get('default', {})}")
 
 # 4. admin 注册 user1
-s, r = req("/api/auth/register", "POST", {"username": "user1", "password": "pass123", "display_name": "测试用户"}, token=admin_token)
+s, r = req("/api/auth/register", "POST", {"username": "user1", "password": "Abc@12345", "display_name": "测试用户"}, token=admin_token)
 check("admin 注册 user1", s == 200 and r.get("username") == "user1", f"-> {s} {r}")
 
 # 5. user1 登录 + 创建知识库
-s, r = req("/api/auth/login", "POST", {"username": "user1", "password": "pass123"})
+s, r = req("/api/auth/login", "POST", {"username": "user1", "password": "Abc@12345"})
 check("user1 登录", s == 200 and r.get("token"), f"-> {s}")
 u1_token = r.get("token", "")
 s, r = req("/api/knowledge/collections/kb_u1", "POST", token=u1_token)

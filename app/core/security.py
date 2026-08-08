@@ -8,11 +8,14 @@
   仅管理员可查询
 - 降级模式: security.auth_enabled=false 时返回内置 system 管理员，
   兼容内网直连场景
+- v1.4: 密码强度策略（等保 2.0 三级）+ 登录失败告警（security.alert）
 
 所有数据库操作使用单连接 + 线程锁（写操作毫秒级，无性能压力）。
 """
 import hashlib
 import hmac
+import logging
+import re
 import secrets
 import sqlite3
 import threading
@@ -25,6 +28,8 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _PBKDF2_ITERATIONS = 600_000
 
@@ -225,8 +230,10 @@ class UserManager:
             raise ValueError("该用户名不可注册")
         if not re_valid_username(username):
             raise ValueError("用户名仅支持字母、数字、下划线、中文")
-        if len(password) < 6:
-            raise ValueError("密码长度至少 6 位")
+        # v1.4 等保：密码强度校验（长度/复杂度/弱口令/不得含用户名）
+        err = validate_password_strength(password, username)
+        if err:
+            raise ValueError(err)
         if self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
             raise ValueError("用户名已存在")
         self.db.execute(
@@ -249,19 +256,26 @@ class UserManager:
             return None, "失败次数过多，账号已临时锁定，请稍后再试"
         if not verify_password(password, row["pass_hash"]):
             # 连续失败计数
-            fail = row["fail_count"] + 1
+            attempt = row["fail_count"] + 1
             locked_until = ""
-            if self.max_attempts > 0 and fail >= self.max_attempts:
+            if self.max_attempts > 0 and attempt >= self.max_attempts:
                 locked_until = time.strftime(
                     "%Y-%m-%d %H:%M:%S", time.localtime(time.time() + 600))
-                fail = 0
                 self.db.execute(
-                    "UPDATE users SET fail_count=?, locked_until=? WHERE username=?",
-                    (fail, locked_until, username))
+                    "UPDATE users SET fail_count=0, locked_until=? WHERE username=?",
+                    (locked_until, username))
+                # v1.4 登录失败告警：触发锁定
+                self._alert_security(
+                    username, f"连续登录失败 {self.max_attempts} 次，账号已锁定 10 分钟")
                 return None, "失败次数过多，账号已临时锁定，请稍后再试"
             self.db.execute(
                 "UPDATE users SET fail_count=?, locked_until=? WHERE username=?",
-                (fail, locked_until, username))
+                (attempt, locked_until, username))
+            # v1.4 登录失败告警：达到告警阈值（仅触发一次，防刷屏）
+            threshold = settings.security.login_alert_threshold
+            if threshold > 0 and attempt == threshold:
+                self._alert_security(
+                    username, f"连续登录失败 {attempt} 次，疑似暴力破解")
             return None, "用户名或密码错误"
         # 成功：重置失败计数，签发令牌
         token = secrets.token_urlsafe(32)
@@ -272,6 +286,14 @@ class UserManager:
             (token, expires, username))
         return User(username=row["username"], role=row["role"],
                     display_name=row["display_name"] or row["username"]), token
+
+    def _alert_security(self, username: str, detail: str) -> None:
+        """v1.4 登录失败告警：security.alert 审计 + WARNING 日志"""
+        try:
+            AuditLogger(self.db).log(username, "security.alert", username, detail)
+        except Exception:  # 告警写入失败不影响登录流程
+            pass
+        logger.warning("[SECURITY] %s: %s", username, detail)
 
     def get_user_by_token(self, token: str) -> Optional[User]:
         """令牌校验（含过期检查）"""
@@ -294,10 +316,13 @@ class UserManager:
             self.db.execute("UPDATE users SET token='' WHERE token=?", (token,))
 
     def change_password(self, username: str, old_password: str, new_password: str) -> tuple[bool, str]:
-        """修改密码，成功返回 (True, "")"""
+        """修改密码，成功返回 (True, "")；v1.4 接入等保强度校验"""
         row = self.db.query_one("SELECT pass_hash FROM users WHERE username=?", (username,))
         if not row or not verify_password(old_password, row["pass_hash"]):
             return False, "原密码不正确"
+        err = validate_password_strength(new_password, username, old_password)
+        if err:
+            return False, err
         self.db.execute(
             "UPDATE users SET pass_hash=? WHERE username=?",
             (hash_password(new_password), username))
@@ -357,9 +382,10 @@ class UserManager:
         self.db.execute("UPDATE users SET role=? WHERE username=?", (role, username))
 
     def reset_password(self, username: str, new_password: str) -> None:
-        """管理员重置密码（同时吊销该用户全部令牌）"""
-        if len(new_password) < 6:
-            raise ValueError("密码长度至少 6 位")
+        """管理员重置密码（同时吊销该用户全部令牌）；v1.4 接入等保强度校验"""
+        err = validate_password_strength(new_password, username)
+        if err:
+            raise ValueError(err)
         if not self.db.query_one("SELECT 1 FROM users WHERE username=?", (username,)):
             raise ValueError(f"用户 '{username}' 不存在")
         self.db.execute(
@@ -603,6 +629,49 @@ class FeedbackManager:
 def re_valid_username(username: str) -> bool:
     import re
     return bool(re.fullmatch(r"[\w\u4e00-\u9fff_-]{2,32}", username))
+
+
+# 常见弱口令黑名单（等保 2.0 三级：禁用弱口令）
+WEAK_PASSWORDS = {
+    "123456", "12345678", "123456789", "1234567890", "000000", "111111",
+    "666666", "888888", "88888888", "password", "password123", "p@ssw0rd",
+    "admin", "admin123", "admin888", "root", "root123", "qwerty", "qwerty123",
+    "abc123", "abc123456", "a123456", "1qaz2wsx", "iloveyou", "welcome",
+    "sunshine", "monkey", "football", "11111111", "123123", "1234567",
+}
+
+
+def validate_password_strength(password: str, username: str = "",
+                               old_password: str = "") -> Optional[str]:
+    """密码强度校验（v1.4 等保 2.0 三级），返回错误信息或 None
+
+    规则：长度 ≥ password_min_length；至少包含小写/大写/数字/特殊字符中 3 类；
+    不在弱口令黑名单；不得与用户名相同或包含用户名（长度 ≥4 时）；不得与原密码相同。
+    """
+    min_len = max(settings.security.password_min_length, 6)
+    if not password or len(password) < min_len:
+        return f"密码长度至少 {min_len} 位"
+    if password.lower() in WEAK_PASSWORDS:
+        return "密码过于简单，请更换（弱口令黑名单）"
+    categories = 0
+    if re.search(r"[a-z]", password):
+        categories += 1
+    if re.search(r"[A-Z]", password):
+        categories += 1
+    if re.search(r"\d", password):
+        categories += 1
+    if re.search(r"[^A-Za-z0-9]", password):
+        categories += 1
+    if categories < 3:
+        return "密码复杂度不足：需包含大写字母/小写字母/数字/特殊字符中的至少 3 类"
+    if username and len(username) >= 2:
+        if password.lower() == username.lower():
+            return "密码不能与用户名相同"
+        if len(username) >= 4 and username.lower() in password.lower():
+            return "密码不能包含用户名"
+    if old_password and password == old_password:
+        return "新密码不能与原密码相同"
+    return None
 
 
 _security_db: Optional[_DB] = None

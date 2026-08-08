@@ -63,12 +63,22 @@ async def index():
 
 
 def main():
-    """启动服务"""
+    """启动服务（v1.4: server.ssl_certfile/ssl_keyfile 非空时启用 HTTPS）"""
+    ssl_kwargs = {}
+    if settings.server.ssl_certfile and settings.server.ssl_keyfile:
+        ssl_kwargs = {
+            "ssl_certfile": settings.server.ssl_certfile,
+            "ssl_keyfile": settings.server.ssl_keyfile,
+        }
+        logger.info("HTTPS 已启用: %s", settings.server.ssl_certfile)
+    elif settings.server.ssl_certfile or settings.server.ssl_keyfile:
+        logger.warning("HTTPS 配置不完整（certfile/keyfile 需同时配置），已忽略并回退 HTTP")
     uvicorn.run(
         "main:app",
         host=settings.server.host,
         port=settings.server.port,
         reload=settings.server.debug,
+        **ssl_kwargs,
     )
 
 

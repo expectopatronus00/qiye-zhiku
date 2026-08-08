@@ -5,7 +5,7 @@
 
 ## 项目是什么
 
-面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB/Milvus + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.3（信创适配），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.3 已完成）。
+面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB/Milvus + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.4（数据安全与等保），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.4 已完成）。
 
 技术栈：Python 3.11 / FastAPI / ChromaDB / Milvus(可选) / SQLite / jieba / PyMuPDF / RapidOCR / pytest。
 
@@ -44,7 +44,8 @@ app/core/          核心逻辑
   document.py      文档解析（PDF 版面按字号分标题/正文、表格转 Markdown、RapidOCR 图片 OCR）
   conversation.py  对话历史管理（上下文窗口、持久化）
   evaluator.py     RAGAS 评估（忠实度/相关性/召回率，本地裁判）
-  security.py      认证（PBKDF2 哈希、令牌 24h、失败锁定 10min）、知识库权限隔离、审计日志、用户反馈 FeedbackManager（feedback 表落库 + 回流评测集）
+  security.py      认证（PBKDF2 哈希、令牌 24h、失败锁定 10min）、知识库权限隔离、审计日志、用户反馈 FeedbackManager（feedback 表落库 + 回流评测集）；v1.4 密码强度 validate_password_strength（≥8 位 + 3 类复杂度 + 弱口令黑名单 + 禁含用户名）+ 登录失败告警 _alert_security（threshold 触发 security.alert，防刷屏）
+  masker.py        v1.4 敏感信息脱敏（SENSITIVE_RULES 6 条正则顺序执行，mask_sensitive 主入口；上传入库前 + 输出兜底双链路）
   logging_setup.py 日志（app.log/access.log 轮转 5MB×5 + 请求中间件带 user/duration）
 app/routers/       API 层（prefix 各自带 /api）
   auth.py          认证（/api/auth）
@@ -57,8 +58,10 @@ app/routers/       API 层（prefix 各自带 /api）
 app/static/index.html  前端单页（原生 JS，深色设计系统 + 浅色主题，无构建步骤）
 eval/run_regression.py  黄金评测集一键回归（hit@5/MRR/top1，混合 vs 纯向量，基线对比；--collect-feedback 合并回流）
 scripts/build_dual_arch.sh  x86_64+arm64 双架构镜像构建推送（buildx）
+scripts/gen_self_signed_cert.py  v1.4 自签 TLS 证书（cryptography 优先，回退系统 openssl；输出 config-add.txt 供追加 config.yaml）
 docs/xinchuang-deploy.md    麒麟 V10 / 统信 UOS 信创部署手册（二进制+Docker 双形态）
-tests/             pytest 测试（176 项，按模块拆分 test_*.py）
+docs/dengbao-checklist.md   v1.4 等保 2.0 三级自查清单（十类控制项对照表 + 快速验证命令）
+tests/             pytest 测试（206 项，按模块拆分 test_*.py）
 ```
 
 ## 常用命令
@@ -90,6 +93,10 @@ curl http://127.0.0.1:8766/healthz && curl http://127.0.0.1:8766/readyz
 15. 国产 provider（ascend/cambricon/mthreads）走 OpenAI 兼容协议：base_url 未配置回退 openai_base_url；api_key 空则省略 Authorization 头（内网无鉴权服务）
 16. Milvus 后端 pymilvus 延迟导入（未安装时 Chroma 路径不受影响）；metadata 用 JSON 字符串存储（Milvus 不支持嵌套 dict 字段），search 返回时解析回 dict；本机无 Docker/Milvus，后端验证靠 mock 单测
 17. 嵌入 ollama 通道必须走 settings.llm.ollama_base_url（曾硬编码 localhost:11434，容器部署时嵌入连不上 Ollama）；向量库统一走 get_vector_store 工厂，禁止直接 new ChromaVectorStore/MilvusVectorStore
+18. v1.4 密码策略：测试密码必须合规（≥8 位 + 3 类字符，如 Abc@12345），旧测试的 6 位密码会报 ValueError；批量替换时注意 change_password/reset_password 测试同步改
+19. 登录失败告警只在"密码错误"分支触发（fail_count 递增路径），锁定事件单独告警；threshold=0 关闭；审计查询参数是 /api/audit?action=security.alert（不是 action_filter）
+20. documents.py 的 get_documents_by_metadata 返回 [{id,content,metadata}] dict 列表，preview 排序 _sort_key 收到的元素是 tuple（d[0] 取 id），不是 dict——v1.3 迁移曾写错导致 500；tools.py 同逻辑是对 dict 排序，两者别混
+21. 验证上传脱敏用 multipart（collection_name 表单字段 + file），不是 JSON；preview 的 filename 带 file_id 前缀（先 /api/documents/list 拿真实文件名）；自签证书验证用 curl -sk
 
 ## 迭代工作流（每个版本必须）
 
