@@ -116,6 +116,22 @@ async def _process_upload(save_path: Path, collection_name: str,
         qa_cache.invalidate(collection_name)
     except Exception:
         pass
+    # v1.6 知识图谱：上传后自动建图（幂等重建该库图谱）
+    if settings.graph.enabled:
+        try:
+            from app.core.graph import graph_builder
+            graph_builder.configure(settings.graph.entity_dict)
+            graph_builder.build(collection_name, sub_chunks)
+        except Exception:  # noqa: BLE001 - 建图失败不影响入库
+            logger = __import__("logging").getLogger("documents")
+            logger.warning("知识图谱构建失败（不影响入库）", exc_info=True)
+    # v1.6 Webhook：上传完成通知（后台线程发送，不阻塞）
+    try:
+        from app.core.webhook import fire_event
+        fire_event("document.uploaded", "文档上传完成",
+                   f"知识库「{collection_name}」新增文档 {filename}，共 {len(sub_chunks)} 块已入库")
+    except Exception:
+        pass
     return len(sub_chunks)
 
 

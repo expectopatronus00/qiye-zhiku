@@ -203,6 +203,13 @@ class TaskManager:
                 "UPDATE tasks SET status=?, error=?, finished_at=? WHERE id=?",
                 (STATUS_FAILED, error[:500], now, task_id))
             self._conn.commit()
+        # v1.6 Webhook：任务失败通知（后台线程，不阻塞 worker）
+        try:
+            from app.core.webhook import fire_event
+            fire_event("task.failed", "后台任务失败",
+                       f"任务 {task_id[:8]}（{task_type}）执行失败：{error[:200]}")
+        except Exception:
+            pass
 
 
 # 全局单例

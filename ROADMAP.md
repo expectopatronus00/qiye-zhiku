@@ -21,6 +21,7 @@
 | Day 13 | v1.3 | 信创适配 | ✅ 国产 GPU 推理 provider 即配即用（昇腾 CANN / 寒武纪 MLU / 摩尔线程，OpenAI 兼容协议 + provider 白名单校验 + 管理台热更新 + readyz 探测）、向量库抽象层（get_vector_store 工厂路由，新增 Milvus 后端：COSINE/字符串主键/metadata JSON 序列化）、x86_64+arm64 双架构镜像（buildx 脚本）、麒麟 V10 / 统信 UOS 部署手册（二进制 + Docker 双形态 + systemd + 昇腾接入示例 + 验收清单），修复嵌入服务硬编码 localhost |
 | Day 14 | v1.4 | 数据安全与等保 | ✅ 敏感信息脱敏双链路（上传入库前 + 输出兜底，completions/stream/agent 三处，手机号/身份证/银行卡/API Key/长Token/邮箱 6 类规则）、密码强度策略（≥8 位 + 3 类复杂度 + 弱口令黑名单 + 禁含用户名 + 改密禁同原密码，注册/改密/重置全入口）、登录失败告警（连续失败达阈值 → security.alert 审计 + WARNING 日志，锁定联动防刷屏）、HTTPS 一键启用（server.ssl_* 配置即切换 + 自签证书脚本）、等保 2.0 三级自查清单（docs/dengbao-checklist.md），修复 chat.py 缺 settings 导入与 preview _sort_key bug |
 | Day 15 | v1.5 | 性能与高可用 | ✅ 异步任务队列（TaskManager：SQLite 持久化 + 2 worker 线程池 + 处理器注册表 + async 自动包装，大文档超阈值转后台索引立即返回 task_id，GET /api/tasks 查询/过滤，前端轮询展示"后台处理中"）、Prometheus 指标（/metrics 手写文本格式：QPS 计数 + 请求/检索/LLM 延迟直方图，中间件与业务埋点零依赖）、热门问题缓存（LRU 256 + TTL 1h，问题标准化 key，纯 RAG 新会话命中 cached:true，上传/删库按库失效）、Redis 会话共享（security.redis_url 配置即启用，token→user 映射 + TTL，故障自动回退 SQLite 双写，多副本部署前提），修复上传异步响应模型 Union 序列化 500 |
+| Day 16 | v1.6 | 进阶能力 | ✅ 知识图谱（上传自动建图：jieba 词性 + 内置信创领域词典 40+ 词，块内共现加权关系，SQLite 按库隔离，/api/graph/* 四端点，侧边栏图谱面板实体标签云 + 关联关系展开，图谱问答增强：实体命中→实体名向量检索注入上下文 + entity_hits 标签持久化）、多模态 VLM 图表理解（OpenAI 兼容端点对接昇腾/寒武纪 Qwen2.5-VL，OCR 文本过少视为图表生成中文描述入库，无 VLM 自动降级 RapidOCR）、Webhook 通知（飞书/钉钉机器人多 URL，四事件：上传完成/任务失败/安全告警/用户反馈，后台线程发送 + 重试 + 不阻塞，管理台热更新 URL），修复 entity_hits 未持久化到对话历史 |
 
 ## 后续演进（v1.1+）
 
@@ -33,7 +34,7 @@
 | v1.3 | 信创适配 | ✅ 国产 GPU 推理 provider（昇腾 CANN / 寒武纪 MLU / 摩尔线程，OpenAI 兼容协议即配即用 + 白名单校验）、x86_64 + arm64 双架构镜像（buildx 脚本）、麒麟 V10 / 统信 UOS 部署手册（docs/xinchuang-deploy.md）、Milvus 国产向量库后端（工厂路由无感切换） | provider 配置即用（单测 31 项 + 真机配置视图验证）、双架构构建脚本就绪（本机无 Docker，交付物为脚本+手册）、Milvus 后端单测覆盖（本机无 Milvus，mock 客户端验证） | 信创招标硬门槛；信创生态全覆盖 |
 | v1.4 | 数据安全与等保 | ✅ 敏感信息脱敏双链路（上传入库前 + 输出兜底，手机号/身份证/银行卡/API Key/长Token/邮箱 6 类规则）、密码强度策略（≥8 位 + 复杂度 + 弱口令黑名单，注册/改密/重置全入口）、登录失败告警（连续失败达阈值 → security.alert 审计）、HTTPS 一键启用（server.ssl_* + 自签证书脚本）、等保2.0三级自查清单（docs/dengbao-checklist.md） | 脱敏命中率测试（单测 + 真机双链路验证）、HTTPS 端到端验证、审计完备 | 央企采购必答项 |
 | v1.5 | 性能与高可用 | ✅ 异步任务队列（大文档后台索引 + 任务状态查询/过滤 + 前端轮询）、Prometheus 指标（/metrics：QPS/延迟/检索与 LLM 耗时直方图）、热门问题缓存（LRU+TTL，命中 cached:true，知识库变更按库失效）、Redis 会话共享（可选配置，故障回退 SQLite 双写） | 大文档上传不阻塞（300KB 真机验证 accepted→success）、缓存二次命中、/metrics 全指标可查、双实例会话一致（mock 单测） | 规模部署前提 |
-| v1.6 | 进阶能力 | 知识图谱（实体抽取 + 关系构建 + 图谱问答）、多模态（本地 VLM 图表理解）、Webhook 集成（飞书/钉钉通知） | 图谱问答链路可用、图表问答演示 | 差异化加分项 |
+| v1.6 | 进阶能力 | ✅ 知识图谱（实体抽取 + 共现关系 + 图谱问答增强 + 前端图谱面板）、多模态（OpenAI 兼容信创 VLM 图表理解，无 VLM 降级 OCR）、Webhook 集成（飞书/钉钉通知四事件） | 图谱问答 entity_hits 真机验证（17/17）、webhook 本地接收端收到推送、UI 截图实体标签正常 | 差异化加分项 |
 
 ## 迭代原则
 

@@ -227,6 +227,8 @@ class DocumentParser:
                             headings: Optional[list[tuple]] = None) -> list[DocumentChunk]:
         """提取页面内嵌图片并 OCR, 结果作为可检索文本入块
 
+        v1.6 增强: OCR 文本极少(< vision.min_text_chars)或为空且图片不大时,
+        调用本地 VLM(OpenAI 兼容)生成图表描述; VLM 未配置/失败则维持纯 OCR 行为。
         headings: [(标题y坐标, 标题文本)], 用于定位图片所属章节,
                   拼入内容帮助中文查询命中英文 OCR 结果
         """
@@ -236,6 +238,8 @@ class DocumentParser:
             return []
         chunks: list[DocumentChunk] = []
         ocr_count = 0
+        vision_enabled = _default_settings.vision.enabled
+        vision_captioner = None
         for xref in xrefs:
             if ocr_count >= self.config.ocr_max_images_per_page:
                 break
@@ -249,10 +253,8 @@ class DocumentParser:
                 info = doc.extract_image(xref)
                 if not info or not info.get("image"):
                     continue
-                text = _ocr_service.ocr_bytes(info["image"])
-                if not text:
-                    continue
-                ocr_count += 1
+                img_bytes = info["image"]
+                mime = info.get("ext", "png")
                 # 取图片上方最近的标题作为章节上下文
                 page_context = ""
                 if headings:
@@ -260,6 +262,30 @@ class DocumentParser:
                         if y0 < rect.y0:
                             page_context = htext
                 prefix = f"[图片内容·{page_context}]" if page_context else "[图片内容]"
+
+                text = _ocr_service.ocr_bytes(img_bytes)
+                # v1.6: OCR 文本不足且图不大 → VLM 图表描述（信创 VLM 走 OpenAI 兼容）
+                if (text is None or len(text) < _default_settings.vision.min_text_chars):
+                    if vision_enabled and len(img_bytes) <= _default_settings.vision.max_image_bytes:
+                        if vision_captioner is None:
+                            from app.core.vision import get_captioner
+                            vision_captioner = get_captioner()
+                        caption = vision_captioner.describe_image(img_bytes, mime, page_context)
+                        if caption:
+                            ocr_count += 1
+                            chunks.append(DocumentChunk(
+                                content=f"{prefix}·图表描述] {caption}",
+                                metadata={
+                                    **base_meta,
+                                    "block_type": "chart",
+                                    "vlm": "true",
+                                    "bbox": ",".join(str(round(v, 1)) for v in (rect.x0, rect.y0, rect.x1, rect.y1)),
+                                }
+                            ))
+                            continue
+                if not text:
+                    continue
+                ocr_count += 1
                 chunks.append(DocumentChunk(
                     content=f"{prefix} {text}",
                     metadata={

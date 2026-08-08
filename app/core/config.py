@@ -145,6 +145,48 @@ class DataConfig(BaseModel):
     conversations: str = "./data/conversations"
 
 
+class GraphConfig(BaseModel):
+    """知识图谱配置 (v1.6)"""
+    enabled: bool = True             # 上传文档时自动建图
+    db_path: str = "./data/graph.db"
+    entity_dict: list[str] = []      # 扩展领域词典（追加到内置信创 GPU/厂商词表）
+    max_entities: int = 200          # 单库实体上限（防无限膨胀）
+    qa_context_topk: int = 3         # 图谱问答增强：实体命中时额外检索的块数
+
+
+class VisionConfig(BaseModel):
+    """多模态 VLM 图表理解配置 (v1.6 信创路线)
+
+    - 走 OpenAI 兼容协议（/v1/chat/completions），昇腾 CANN(vLLM-Ascend)/寒武纪 部署
+      Qwen2.5-VL 等模型时 base_url 指向前端推理服务
+    - provider 留空或 base_url 为空 → 降级 RapidOCR 纯文本（本机无 VLM 也能跑）
+    - 仅对"图表类"图片（宽高比接近或 OCR 文本极少）调用 VLM 生成描述
+    """
+    enabled: bool = True
+    base_url: str = ""               # OpenAI 兼容 VLM 端点，空则降级纯 OCR
+    model: str = "qwen2.5-vl:7b"
+    api_key: str = ""
+    min_text_chars: int = 30         # OCR 文本 < 该值视为图表 → 调用 VLM
+    max_image_bytes: int = 2 * 1024 * 1024  # 超过不送 VLM（防超大图），仅 OCR
+
+
+class WebhookConfig(BaseModel):
+    """Webhook 通知配置 (v1.6)
+
+    - 飞书/钉钉自定义机器人 URL（各最多 1 个，支持多 webhook 用逗号分隔）
+    - 事件开关：document.uploaded 上传完成 / task.failed 后台任务失败 /
+      security.alert 安全告警 / feedback.submitted 用户反馈
+    - 异步发送 + 5s 超时 + 单次重试，失败仅记日志不阻塞主流程
+    """
+    enabled: bool = True
+    feishu_urls: str = ""            # 飞书自定义机器人，多个逗号分隔
+    dingtalk_urls: str = ""          # 钉钉自定义机器人，多个逗号分隔
+    notify_upload: bool = True
+    notify_task_failed: bool = True
+    notify_security_alert: bool = True
+    notify_feedback: bool = True
+
+
 class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     llm: LLMConfig = LLMConfig()
@@ -158,6 +200,9 @@ class Settings(BaseModel):
     security: SecurityConfig = SecurityConfig()
     agent: AgentConfig = AgentConfig()
     cache: CacheConfig = CacheConfig()
+    graph: GraphConfig = GraphConfig()
+    vision: VisionConfig = VisionConfig()
+    webhook: WebhookConfig = WebhookConfig()
     data: DataConfig = DataConfig()
 
 
@@ -195,6 +240,10 @@ ADMIN_EDITABLE: dict[str, set[str]] = {
     "query_rewrite": {"enabled", "max_history_turns"},
     "agent": {"max_iterations"},
     "document": {"chunk_size", "chunk_overlap", "ocr_enabled"},
+    "graph": {"enabled", "entity_dict", "qa_context_topk"},
+    "vision": {"enabled", "base_url", "model", "api_key", "min_text_chars"},
+    "webhook": {"enabled", "feishu_urls", "dingtalk_urls", "notify_upload",
+                "notify_task_failed", "notify_security_alert", "notify_feedback"},
 }
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"

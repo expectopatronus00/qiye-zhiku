@@ -322,7 +322,7 @@ async function switchConversation(conversationId) {
             if (msg.role === 'user') {
                 appendUserMessage(msg.content);
             } else if (msg.role === 'assistant') {
-                appendAssistantMessage(msg.content, msg.sources || [], msg.tool_steps || [], null, msg.id || '', msg.retrieval_debug || null);
+                appendAssistantMessage(msg.content, msg.sources || [], msg.tool_steps || [], null, msg.id || '', msg.retrieval_debug || null, msg.entity_hits || []);
             }
         });
     } catch (err) {
@@ -620,7 +620,7 @@ function appendUserMessage(content) {
     return div;
 }
 
-function appendAssistantMessage(content, sources, toolSteps, agentInfo, messageId, retrievalDebug) {
+function appendAssistantMessage(content, sources, toolSteps, agentInfo, messageId, retrievalDebug, entityHits) {
     const inner = getMessagesContainer();
     const welcome = inner.querySelector('.welcome-message');
     if (welcome) welcome.remove();
@@ -703,6 +703,21 @@ function appendAssistantMessage(content, sources, toolSteps, agentInfo, messageI
             files.appendChild(tag);
         });
         div.appendChild(files);
+    }
+
+    // 知识图谱实体命中标签 (v1.6)
+    if (entityHits && entityHits.length > 0) {
+        const hitsBox = document.createElement('div');
+        hitsBox.className = 'graph-hits';
+        hitsBox.innerHTML = '<span class="graph-hits-label">图谱实体</span>';
+        entityHits.forEach(h => {
+            const tag = document.createElement('span');
+            tag.className = 'graph-hit-tag';
+            tag.textContent = h;
+            tag.title = '问题命中知识图谱实体，已注入相关实体上下文';
+            hitsBox.appendChild(tag);
+        });
+        div.appendChild(hitsBox);
     }
 
     // 来源卡片（编号 + 文件名 + 相关度，点击预览）
@@ -1065,7 +1080,7 @@ async function sendMessage() {
                 document.getElementById('chat-title').textContent = message.slice(0, 20) + (message.length > 20 ? '...' : '');
             }
 
-            appendAssistantMessage(data.answer, [], data.tool_steps || [], data);
+            appendAssistantMessage(data.answer, [], data.tool_steps || [], data, data.message_id || '', data.retrieval_debug || null, data.entity_hits || []);
             return;
         }
 
@@ -1101,7 +1116,7 @@ async function sendMessage() {
             document.getElementById('chat-title').textContent = message.slice(0, 20) + (message.length > 20 ? '...' : '');
         }
 
-        appendAssistantMessage(data.answer, data.sources || [], [], null, data.message_id || '', data.retrieval_debug || null);
+        appendAssistantMessage(data.answer, data.sources || [], [], null, data.message_id || '', data.retrieval_debug || null, data.entity_hits || []);
     } catch (err) {
         removeTyping(loadingId);
         if (err.message.includes('重新登录')) {
@@ -1242,6 +1257,90 @@ async function refreshStats() {
         }
     } catch (err) {
         console.error('刷新统计失败:', err);
+    }
+    loadGraph();
+}
+
+// ========== 知识图谱面板 (v1.6) ==========
+
+let activeGraphEntity = null;   // 当前选中实体
+
+async function loadGraph() {
+    const collection = document.getElementById('collection-select').value;
+    const box = document.getElementById('graph-panel');
+    if (!box) return;
+    activeGraphEntity = null;
+
+    try {
+        const [statsResp, entResp] = await Promise.all([
+            apiFetch(`/api/graph/stats/${collection}`),
+            apiFetch(`/api/graph/entities/${collection}?limit=24`),
+        ]);
+        if (!statsResp.ok || !entResp.ok) {
+            box.innerHTML = '<p class="graph-empty">当前知识库暂无图谱数据<br><span class="hint">上传文档后自动构建实体关系</span></p>';
+            return;
+        }
+        const stats = await statsResp.json();
+        const ents = await entResp.json();
+
+        box.innerHTML = `<div class="graph-stats"><span>实体 <b>${stats.entities || 0}</b></span><span>关系 <b>${stats.relations || 0}</b></span></div>`;
+        if (!ents.items || ents.items.length === 0) {
+            box.insertAdjacentHTML('beforeend', '<p class="graph-empty">暂无实体，上传文档后自动构建</p>');
+            return;
+        }
+
+        const tags = document.createElement('div');
+        tags.className = 'graph-tags';
+        ents.items.forEach(e => {
+            const tag = document.createElement('span');
+            tag.className = 'graph-tag' + (e.count >= 3 ? ' hot' : '');
+            tag.textContent = e.name;
+            tag.title = `${e.name} · 出现 ${e.count} 次`;
+            tag.onclick = () => showGraphEntity(collection, e.name);
+            tags.appendChild(tag);
+        });
+        box.appendChild(tags);
+
+        const detail = document.createElement('div');
+        detail.id = 'graph-detail';
+        box.appendChild(detail);
+    } catch (err) {
+        console.error('加载图谱失败:', err);
+        box.innerHTML = '<p class="graph-empty">图谱加载失败</p>';
+    }
+}
+
+async function showGraphEntity(collection, entity) {
+    const detail = document.getElementById('graph-detail');
+    if (!detail) return;
+    activeGraphEntity = entity;
+
+    try {
+        const resp = await apiFetch(`/api/graph/relations/${collection}?entity=${encodeURIComponent(entity)}&limit=15`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const rels = data.items || [];
+
+        detail.innerHTML = `<div class="graph-detail-head"><span>「${escapeHtml(entity)}」关联</span>
+            <span class="graph-detail-close" onclick="document.getElementById('graph-detail').innerHTML=''">&times;</span></div>`;
+        if (rels.length === 0) {
+            detail.insertAdjacentHTML('beforeend', '<p class="graph-empty">暂无关联关系</p>');
+            return;
+        }
+        const ul = document.createElement('ul');
+        ul.className = 'graph-rel-list';
+        rels.forEach(r => {
+            const li = document.createElement('li');
+            const other = r.direction === 'out' ? r.target : r.source;
+            li.innerHTML = `<span class="graph-rel-arrow">${r.direction === 'out' ? '→' : '←'}</span>
+                <span class="graph-rel-name">${escapeHtml(other)}</span>
+                <span class="graph-rel-weight">×${r.weight}</span>`;
+            li.onclick = () => showGraphEntity(collection, other);
+            ul.appendChild(li);
+        });
+        detail.appendChild(ul);
+    } catch (err) {
+        console.error('加载实体关系失败:', err);
     }
 }
 

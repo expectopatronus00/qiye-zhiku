@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.6.0"
 
 router = APIRouter(tags=["健康检查"])
 

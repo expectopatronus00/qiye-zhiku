@@ -304,6 +304,12 @@ class UserManager:
         except Exception:  # 告警写入失败不影响登录流程
             pass
         logger.warning("[SECURITY] %s: %s", username, detail)
+        # v1.6 Webhook：安全告警通知（后台线程，不阻塞登录）
+        try:
+            from app.core.webhook import fire_event
+            fire_event("security.alert", "安全告警", f"用户 {username}：{detail}")
+        except Exception:
+            pass
 
     def get_user_by_token(self, token: str) -> Optional[User]:
         """令牌校验（含过期检查）；v1.5 优先查共享会话存储，未命中回退 SQLite"""

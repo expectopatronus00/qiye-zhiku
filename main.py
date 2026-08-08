@@ -10,9 +10,9 @@ from app.core.logging_setup import get_logger, request_log_middleware, setup_log
 from app.core.vectorstore import get_vector_store
 from app.core.security import get_audit_logger, get_kb_registry, get_user_manager
 from app.core.tasks import task_manager
-from app.routers import admin, auth, audit, chat, documents, health, knowledge, tasks
+from app.routers import admin, auth, audit, chat, documents, graph, health, knowledge, tasks
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 logger = get_logger("main")
 
 # 统一日志（文件轮转 + 控制台），启动即生效
@@ -36,6 +36,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["文档"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["知识库"])
 app.include_router(admin.router, prefix="/api/admin", tags=["管理后台"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["任务"])
+app.include_router(graph.router, prefix="/api/graph", tags=["知识图谱"])
 
 # 静态文件
 static_dir = Path(__file__).parent / "app" / "static"

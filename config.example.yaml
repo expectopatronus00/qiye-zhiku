@@ -186,3 +186,46 @@ cache:
   maxsize: 256
   # 缓存有效期（秒，1 小时）
   ttl_seconds: 3600
+
+# 知识图谱 (v1.6)
+graph:
+  # 是否启用（上传文档时自动抽取实体/共现关系建图）
+  enabled: true
+  # 图谱 SQLite 路径
+  db_path: "./data/graph.db"
+  # 扩展领域词典（追加到内置信创 GPU/厂商词表：昇腾/寒武纪/摩尔线程/海光/飞腾/鲲鹏/龙芯/兆芯/昆仑/Atlas 等）
+  entity_dict: []
+  # 单库实体上限（防无限膨胀）
+  max_entities: 200
+  # 图谱问答增强：实体命中时按实体名额外检索的块数
+  qa_context_topk: 3
+
+# 多模态 VLM 图表理解 (v1.6 信创路线)
+vision:
+  # 是否启用（未配置 VLM 时自动降级纯 OCR，不影响入库）
+  enabled: true
+  # OpenAI 兼容 VLM 端点（昇腾 CANN vLLM-Ascend/寒武纪/摩尔线程部署 Qwen2.5-VL 等时填写；
+  # 空则图表图片仅走 RapidOCR 文本识别）
+  base_url: ""
+  # VLM 模型名
+  model: "qwen2.5-vl:7b"
+  # API Key（内网无鉴权服务留空）
+  api_key: ""
+  # OCR 文本少于该字符数视为图表 → 调用 VLM 生成中文描述
+  min_text_chars: 30
+  # 送 VLM 的图片大小上限（超过仅 OCR，防超大图拖慢入库）
+  max_image_bytes: 2097152
+
+# Webhook 通知 (v1.6)
+webhook:
+  # 总开关
+  enabled: true
+  # 飞书自定义机器人 URL（多个逗号分隔；留空不推送）
+  feishu_urls: ""
+  # 钉钉自定义机器人 URL（多个逗号分隔；留空不推送）
+  dingtalk_urls: ""
+  # 事件开关：文档上传完成 / 后台任务失败 / 安全告警 / 用户反馈
+  notify_upload: true
+  notify_task_failed: true
+  notify_security_alert: true
+  notify_feedback: true

@@ -17,6 +17,7 @@ class Message:
     timestamp: float = field(default_factory=time.time)
     sources: list[dict] = field(default_factory=list)  # RAG 检索来源（仅 assistant）
     tool_steps: list[dict] = field(default_factory=list)  # Agent 工具调用步骤（v0.9）
+    entity_hits: list[str] = field(default_factory=list)  # 图谱问答命中实体 (v1.6)
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])  # 消息ID（v1.2 反馈锚点）
 
     def to_dict(self) -> dict:
@@ -27,6 +28,7 @@ class Message:
             "timestamp": self.timestamp,
             "sources": self.sources,
             "tool_steps": self.tool_steps,
+            "entity_hits": self.entity_hits,
         }
 
     def to_llm_dict(self) -> dict:
@@ -45,9 +47,9 @@ class Conversation:
     updated_at: float = field(default_factory=time.time)
 
     def add_message(self, role: str, content: str, sources: list[dict] = None,
-                    tool_steps: list[dict] = None):
+                    tool_steps: list[dict] = None, entity_hits: list[str] = None):
         msg = Message(role=role, content=content, sources=sources or [],
-                      tool_steps=tool_steps or [])
+                      tool_steps=tool_steps or [], entity_hits=entity_hits or [])
         self.messages.append(msg)
         self.updated_at = time.time()
 
@@ -165,6 +167,7 @@ class ConversationManager:
                             timestamp=msg_data.get("timestamp", 0),
                             sources=msg_data.get("sources", []),
                             tool_steps=msg_data.get("tool_steps", []),
+                            entity_hits=msg_data.get("entity_hits", []),
                             id=msg_data.get("id", uuid.uuid4().hex[:12]),
                         )
                     )

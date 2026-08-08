@@ -54,6 +54,7 @@ class ChatResponse(BaseModel):
     message_id: str = ""  # 助手消息 ID（v1.2 反馈锚点）
     retrieval_debug: Optional[dict] = None  # 检索诊断（v1.2 详情面板）
     cached: bool = False  # v1.5 是否命中热门问题缓存
+    entity_hits: list[str] = []  # v1.6 图谱问答：命中的知识图谱实体
 
 
 class FeedbackRequest(BaseModel):
@@ -151,14 +152,46 @@ async def clear_conversation(conversation_id: str,
 
 # ========== RAG 核心逻辑（共享） ==========
 
+async def _graph_enhance(retriever, collection: str, question: str) -> tuple[list[str], str]:
+    """v1.6 图谱问答增强：抽取问题实体 → 命中库内实体 → 用实体名向量检索补充上下文
+
+    返回 (entity_hits, extra_context)
+    """
+    try:
+        from app.core.graph import graph_builder
+        entities = graph_builder.extract_entities(question)
+        if not entities or not settings.graph.enabled:
+            return [], ""
+        known = {e["name"] for e in graph_builder.entities(collection, limit=500)}
+        hits = [e for e in entities if e in known][:3]
+        if not hits:
+            return [], ""
+        # 每个命中实体做一次向量检索，取补充块
+        embedder = retriever.embedding_service
+        extra_blocks: list[str] = []
+        for ent in hits[:2]:
+            vec = await embedder.embed_query(ent)
+            docs = retriever.vectorstore.search(query_embedding=vec,
+                                                top_k=settings.graph.qa_context_topk)
+            for d in docs[:settings.graph.qa_context_topk]:
+                content = d.get("content", "").strip()
+                if content and content not in extra_blocks:
+                    extra_blocks.append(content[:400])
+        extra = ("\n\n---\n\n【知识图谱补充知识（实体: " + "、".join(hits) + "）】\n"
+                 + "\n\n".join(extra_blocks)) if extra_blocks else ""
+        return hits, extra
+    except Exception:  # noqa: BLE001 - 图谱增强失败不影响主流程
+        return [], ""
+
+
 async def _prepare_rag_messages(
     llm: LLMService,
     conv,
     request: ChatRequest,
-) -> tuple[list[dict], list[dict], Optional[str], Optional[dict]]:
-    """构建 RAG 消息列表 + 来源 + 改写后查询 + 检索诊断
+) -> tuple[list[dict], list[dict], Optional[str], Optional[dict], list[str]]:
+    """构建 RAG 消息列表 + 来源 + 改写后查询 + 检索诊断 + v1.6 图谱命中实体
 
-    返回: (messages, sources, rewritten_query, retrieval_debug)
+    返回: (messages, sources, rewritten_query, retrieval_debug, entity_hits)
     """
     # 记录用户消息（先存历史，供 Query 改写参考）
     conv.add_message("user", request.message)
@@ -197,13 +230,19 @@ async def _prepare_rag_messages(
             for doc in docs
         )
 
+        # v1.6 图谱问答增强：实体命中注入补充上下文
+        entity_hits, graph_extra = await _graph_enhance(
+            retriever, conv.collection_name, request.message)
+        if graph_extra:
+            context += graph_extra
+
         messages = [
             {"role": "system", "content": RAG_SYSTEM_PROMPT.format(context=context)},
         ]
         messages.extend(history)
         messages.append({"role": "user", "content": request.message})
 
-        return messages, sources, (rewritten_query if query_changed else None), retriever.last_debug
+        return messages, sources, (rewritten_query if query_changed else None), retriever.last_debug, entity_hits
     else:
         # 直接对话模式
         messages = [
@@ -212,7 +251,7 @@ async def _prepare_rag_messages(
         messages.extend(history)
         messages.append({"role": "user", "content": request.message})
 
-        return messages, [], None, None
+        return messages, [], None, None, []
 
 
 def _get_or_create_conv(request: ChatRequest):
@@ -246,7 +285,8 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
         if cached is not None:
             # 命中：仍落对话记录（保证反馈锚点与历史一致），跳过 LLM/检索
             conv.add_message("user", request.message)
-            msg = conv.add_message("assistant", cached["answer"], sources=cached["sources"])
+            msg = conv.add_message("assistant", cached["answer"], sources=cached["sources"],
+                                   entity_hits=cached.get("entity_hits", []))
             conversation_manager.save(conv)
             get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
                                    f"对话 {conv.id}，问题: {request.message[:80]}（缓存命中）")
@@ -257,9 +297,10 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
                 conversation_id=conv.id,
                 message_id=msg.id,
                 cached=True,
+                entity_hits=cached.get("entity_hits", []),
             )
 
-    messages, sources, rewritten_query, retrieval_debug = await _prepare_rag_messages(llm, conv, request)
+    messages, sources, rewritten_query, retrieval_debug, entity_hits = await _prepare_rag_messages(llm, conv, request)
 
     answer = await llm.chat(messages)
     # v1.4 输出链路脱敏（防 LLM 幻觉生成敏感信息）
@@ -268,13 +309,13 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
         answer = mask_sensitive(answer)
 
     # 记录助手回复
-    msg = conv.add_message("assistant", answer, sources=sources)
+    msg = conv.add_message("assistant", answer, sources=sources, entity_hits=entity_hits)
     conversation_manager.save(conv)
 
     if cacheable:
         from app.core.cache import qa_cache
         qa_cache.set(request.collection_name, request.message,
-                     {"answer": answer, "sources": sources})
+                     {"answer": answer, "sources": sources, "entity_hits": entity_hits})
 
     get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
                            f"对话 {conv.id}，问题: {request.message[:80]}")
@@ -287,6 +328,7 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
         rewritten_query=rewritten_query,
         message_id=msg.id,
         retrieval_debug=retrieval_debug,
+        entity_hits=entity_hits,
     )
 
 
@@ -297,7 +339,7 @@ async def chat_stream(request: ChatRequest, user: User = Depends(get_current_use
     llm = LLMService()
     conv = _get_or_create_conv(request)
 
-    messages, sources, rewritten_query, _debug = await _prepare_rag_messages(llm, conv, request)
+    messages, sources, rewritten_query, _debug, _hits = await _prepare_rag_messages(llm, conv, request)
 
     full_response = []
 
@@ -315,7 +357,7 @@ async def chat_stream(request: ChatRequest, user: User = Depends(get_current_use
         if settings.security.mask_sensitive:
             from app.core.masker import mask_sensitive
             final_answer = mask_sensitive(final_answer)
-        conv.add_message("assistant", final_answer, sources=sources)
+        conv.add_message("assistant", final_answer, sources=sources, entity_hits=_hits)
         conversation_manager.save(conv)
         get_audit_logger().log(user.username, "chat.stream", conv.collection_name,
                                f"对话 {conv.id}，问题: {request.message[:80]}")
@@ -368,7 +410,7 @@ async def chat_agent(request: AgentRequest, user: User = Depends(get_current_use
             # _prepare_rag_messages 会重新记录用户消息，先移除刚加的
             if conv.messages and conv.messages[-1].role == "user":
                 conv.messages.pop()
-            messages, sources, rewritten, _debug = await _prepare_rag_messages(llm, conv, rag_request)
+            messages, sources, rewritten, _debug, _hits = await _prepare_rag_messages(llm, conv, rag_request)
             answer = await llm.chat(messages)
             if settings.security.mask_sensitive:
                 from app.core.masker import mask_sensitive
@@ -378,8 +420,10 @@ async def chat_agent(request: AgentRequest, user: User = Depends(get_current_use
         except Exception:
             raise HTTPException(status_code=500, detail=f"Agent 调用失败: {exc}")
 
-    # 持久化助手回复（含工具步骤）
-    conv.add_message("assistant", result["answer"], sources=[], tool_steps=result["steps"])
+    # 持久化助手回复（含工具步骤）；fallback 路径带图谱命中实体
+    conv.add_message("assistant", result["answer"], sources=[],
+                     tool_steps=result["steps"],
+                     entity_hits=_hits if result.get("fallback") else [])
     conversation_manager.save(conv)
 
     get_audit_logger().log(
@@ -397,6 +441,7 @@ async def chat_agent(request: AgentRequest, user: User = Depends(get_current_use
         "iterations": result.get("iterations", 0),
         "fallback": result.get("fallback", False),
         "fallback_reason": result.get("reason", ""),
+        "entity_hits": _hits if result.get("fallback") else [],
     }
 
 
@@ -451,4 +496,12 @@ async def submit_feedback(req: FeedbackRequest,
         user.username, "chat.feedback", conv.collection_name,
         f"消息 {msg.id} {req.rating}，原因: {req.reason[:60]}",
     )
+    # v1.6 Webhook：用户反馈通知（后台线程，不阻塞）
+    try:
+        from app.core.webhook import fire_event
+        rating_cn = "点赞" if req.rating == "up" else "点踩"
+        fire_event("feedback.submitted", "收到用户反馈",
+                   f"用户 {user.username} 对回答{rating_cn}：{(req.reason or req.expected_answer or '')[:100]}")
+    except Exception:
+        pass
     return {"ok": True, "id": fb}
