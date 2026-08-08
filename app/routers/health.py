@@ -106,3 +106,12 @@ async def health_legacy():
         "version": APP_VERSION,
         "llm": "ok" if llm["ok"] else "unavailable",
     }
+
+
+@router.get("/metrics")
+async def metrics():
+    """Prometheus 指标（v1.5，免登录供采集端抓取）"""
+    from app.core.metrics import render_metrics
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(render_metrics(),
+                             media_type="text/plain; version=0.0.4")

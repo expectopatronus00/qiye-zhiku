@@ -183,11 +183,16 @@ class _DB:
 class UserManager:
     """用户注册/登录/令牌管理"""
 
-    def __init__(self, db: _DB):
+    def __init__(self, db: _DB, session_store=None):
         self.db = db
         self.admin_username = settings.security.admin_username
         self.token_expire_hours = settings.security.token_expire_hours
         self.max_attempts = settings.security.max_login_attempts
+        # v1.5 会话存储：redis_url 非空走 Redis 共享（可注入覆盖便于测试）
+        if session_store is None:
+            from app.core.session import get_session_store
+            session_store = get_session_store()
+        self.session_store = session_store
 
     def bootstrap_admin(self) -> str:
         """确保管理员存在；返回管理员初始密码
@@ -284,6 +289,11 @@ class UserManager:
         self.db.execute(
             "UPDATE users SET token=?, token_expires=?, fail_count=0, locked_until='' WHERE username=?",
             (token, expires, username))
+        # v1.5 会话共享：Redis 双写（故障自动回退，SQLite 为权威）
+        try:
+            self.session_store.save(username, token, self.token_expire_hours * 3600)
+        except Exception:  # noqa: BLE001
+            logger.warning("会话存储写入异常，已回退 SQLite", exc_info=True)
         return User(username=row["username"], role=row["role"],
                     display_name=row["display_name"] or row["username"]), token
 
@@ -296,10 +306,18 @@ class UserManager:
         logger.warning("[SECURITY] %s: %s", username, detail)
 
     def get_user_by_token(self, token: str) -> Optional[User]:
-        """令牌校验（含过期检查）"""
+        """令牌校验（含过期检查）；v1.5 优先查共享会话存储，未命中回退 SQLite"""
         if not token:
             return None
-        row = self.db.query_one("SELECT * FROM users WHERE token=?", (token,))
+        # v1.5 共享会话：Redis 命中直接定位用户（SQLite 模式返回 None 走原逻辑）
+        try:
+            username = self.session_store.get_username(token)
+        except Exception:  # noqa: BLE001 - Redis 故障回退 SQLite
+            username = None
+        if username is not None:
+            row = self.db.query_one("SELECT * FROM users WHERE username=?", (username,))
+        else:
+            row = self.db.query_one("SELECT * FROM users WHERE token=?", (token,))
         if not row:
             return None
         if not row["enabled"]:
@@ -314,6 +332,11 @@ class UserManager:
     def logout(self, token: str):
         if token:
             self.db.execute("UPDATE users SET token='' WHERE token=?", (token,))
+            # v1.5 共享会话同步清除
+            try:
+                self.session_store.delete(token)
+            except Exception:  # noqa: BLE001
+                pass
 
     def change_password(self, username: str, old_password: str, new_password: str) -> tuple[bool, str]:
         """修改密码，成功返回 (True, "")；v1.4 接入等保强度校验"""

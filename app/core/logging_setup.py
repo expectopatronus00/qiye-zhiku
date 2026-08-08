@@ -83,10 +83,13 @@ def get_logger(name: str) -> logging.Logger:
 
 
 async def request_log_middleware(request: Request, call_next):
-    """请求日志：方法/路径/状态码/耗时/用户"""
+    """请求日志：方法/路径/状态码/耗时/用户 + v1.5 Prometheus 指标埋点"""
     start = time.time()
     response = await call_next(request)
     duration_ms = round((time.time() - start) * 1000)
+    from app.core.metrics import record_request  # 延迟导入避免循环依赖
+    record_request(request.method, request.url.path, response.status_code,
+                   duration_ms / 1000)
     logger = get_logger("access")
     username = getattr(request.state, "username", None)
     logger.info(

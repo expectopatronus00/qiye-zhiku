@@ -49,7 +49,15 @@ class Retriever:
         self.last_debug: Optional[dict] = None  # 最近一次检索的诊断数据（v1.2）
 
     async def retrieve(self, query: str) -> list[dict]:
-        """检索相关文档（每次调用刷新 last_debug 诊断数据）"""
+        """检索相关文档（每次调用刷新 last_debug 诊断数据）+ v1.5 耗时埋点"""
+        start = time.perf_counter()
+        try:
+            return await self._retrieve_impl(query)
+        finally:
+            from app.core.metrics import record_duration  # 延迟导入避免循环依赖
+            record_duration("retrieval", time.perf_counter() - start)
+
+    async def _retrieve_impl(self, query: str) -> list[dict]:
         start = time.perf_counter()
         query_embedding = await self.embedding_service.embed_query(query)
 

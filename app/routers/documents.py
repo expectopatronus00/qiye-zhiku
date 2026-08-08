@@ -1,6 +1,7 @@
 """文档管理 API 路由 (v0.7 接入知识库权限)"""
 import uuid
 from pathlib import Path
+from typing import Union
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from pydantic import BaseModel
 
@@ -15,6 +16,7 @@ from app.core.security import (
     get_kb_registry,
     require_kb_access,
 )
+from app.core.tasks import task_manager
 
 router = APIRouter()
 
@@ -27,6 +29,15 @@ class DocumentUploadResponse(BaseModel):
     status: str
 
 
+class TaskUploadResponse(BaseModel):
+    """大文档异步上传响应（v1.5：立即返回，后台处理）"""
+    filename: str
+    collection_name: str
+    status: str
+    task_id: str
+    message: str
+
+
 class DocumentListResponse(BaseModel):
     """文档列表响应"""
     collection_name: str
@@ -34,13 +45,117 @@ class DocumentListResponse(BaseModel):
     documents: list[str]
 
 
-@router.post("/upload", response_model=DocumentUploadResponse)
+async def _process_upload(save_path: Path, collection_name: str,
+                          username: str, file_id: str, filename: str) -> int:
+    """解析 + 分块 + 脱敏 + 配额校验 + 嵌入 + 入库；返回块数（上传处理公共逻辑）"""
+    # 解析文档
+    parser = DocumentParser()
+    chunks = parser.parse(str(save_path))
+
+    if not chunks:
+        raise HTTPException(status_code=400, detail="文档解析失败：未提取到有效内容")
+
+    # 分块
+    splitter = TextSplitter(
+        chunk_size=settings.document.chunk_size,
+        chunk_overlap=settings.document.chunk_overlap,
+    )
+    sub_chunks = splitter.split(chunks)
+
+    # v1.4 上传链路脱敏：向量库内不落明文（手机号/身份证/银行卡/密钥等）
+    if settings.security.mask_sensitive:
+        from app.core.masker import mask_sensitive
+        for c in sub_chunks:
+            c.content = mask_sensitive(c.content)
+
+    # v1.1 配额校验（块数 + 文档数，-1 表示不限制）
+    registry = get_kb_registry()
+    kb = registry.get(collection_name)
+    vectorstore = get_vector_store(collection_name=collection_name)
+    existing_chunks = vectorstore.count()
+    doc_count = 0
+    if kb is not None and (kb.quota_chunks >= 0 or kb.quota_documents >= 0):
+        try:
+            metas = vectorstore.get_metadatas()
+            doc_count = len({m.get("filename", "unknown") for m in metas})
+        except Exception:
+            pass
+    if kb is not None and kb.quota_chunks >= 0 and \
+            existing_chunks + len(sub_chunks) > kb.quota_chunks:
+        raise HTTPException(
+            status_code=403,
+            detail=f"知识库 '{collection_name}' 块数配额 {kb.quota_chunks} 已满"
+                   f"（当前 {existing_chunks}，本次新增 {len(sub_chunks)}），请联系管理员调整配额")
+    if kb is not None and kb.quota_documents >= 0 and doc_count + 1 > kb.quota_documents:
+        raise HTTPException(
+            status_code=403,
+            detail=f"知识库 '{collection_name}' 文档数配额 {kb.quota_documents} 已满"
+                   f"（当前 {doc_count} 份），请联系管理员调整配额")
+
+    # 生成嵌入向量
+    embedding_service = EmbeddingService()
+    texts = [chunk.content for chunk in sub_chunks]
+    embeddings = await embedding_service.embed_text(texts)
+
+    # 存入向量数据库
+    ids = [f"{file_id}_{i}" for i in range(len(sub_chunks))]
+    metadatas = [chunk.metadata for chunk in sub_chunks]
+
+    vectorstore.add_documents(
+        ids=ids,
+        documents=texts,
+        embeddings=embeddings,
+        metadatas=metadatas,
+    )
+
+    get_audit_logger().log(username, "document.upload", collection_name,
+                           f"上传 {filename}，共 {len(sub_chunks)} 块")
+    # v1.5 知识库内容变更 → 热门问题缓存按库失效
+    try:
+        from app.core.cache import qa_cache
+        qa_cache.invalidate(collection_name)
+    except Exception:
+        pass
+    return len(sub_chunks)
+
+
+def _async_upload_handler(task_id: str, params: dict) -> dict:
+    """后台任务处理器：调用公共处理逻辑（async 包装在 TaskManager 内完成）"""
+    import asyncio
+
+    save_path = Path(params["save_path"])
+    try:
+        chunks_count = asyncio.run(_process_upload(
+            save_path, params["collection_name"],
+            params["username"], params["file_id"], params["filename"],
+        ))
+        return {"chunks_count": chunks_count, "status": "success"}
+    except HTTPException as e:
+        if save_path.exists():
+            save_path.unlink()
+        return {"error": e.detail, "status": "failed"}
+    except Exception as e:  # noqa: BLE001
+        if save_path.exists():
+            save_path.unlink()
+        return {"error": str(e), "status": "failed"}
+
+
+# 注册异步上传处理器（幂等）
+if not task_manager.has_handler("document.upload"):
+    task_manager.register("document.upload", _async_upload_handler)
+
+
+@router.post("/upload", response_model=Union[DocumentUploadResponse, TaskUploadResponse])
 async def upload_document(
     file: UploadFile = File(...),
     collection_name: str = Form("default"),
     user: User = Depends(get_current_user),
 ):
-    """上传并解析文档，生成向量存入知识库（需知识库访问权限）"""
+    """上传并解析文档，生成向量存入知识库（需知识库访问权限）
+
+    v1.5: 超过 async_upload_threshold（默认 5MB）的大文档自动转后台任务，
+    立即返回 202 语义（status=accepted + task_id），可轮询 /api/tasks/{id}。
+    """
     # 权限校验
     require_kb_access(collection_name, user)
 
@@ -62,73 +177,31 @@ async def upload_document(
     content = await file.read()
     save_path.write_bytes(content)
 
+    # v1.5 大文档异步化：超过阈值不阻塞请求，后台处理
+    if len(content) > settings.document.async_upload_threshold:
+        task_id = task_manager.submit("document.upload", {
+            "save_path": str(save_path),
+            "collection_name": collection_name,
+            "username": user.username,
+            "file_id": file_id,
+            "filename": file.filename,
+        }, created_by=user.username)
+        return TaskUploadResponse(
+            filename=file.filename,
+            collection_name=collection_name,
+            status="accepted",
+            task_id=task_id,
+            message=f"文档 {len(content) // 1024 // 1024}MB 超过异步阈值"
+                    f"（{settings.document.async_upload_threshold // 1024 // 1024}MB），"
+                    f"已进入后台处理，任务 ID: {task_id}",
+        )
+
     try:
-        # 解析文档
-        parser = DocumentParser()
-        chunks = parser.parse(str(save_path))
-
-        if not chunks:
-            raise HTTPException(status_code=400, detail="文档解析失败：未提取到有效内容")
-
-        # 分块
-        splitter = TextSplitter(
-            chunk_size=settings.document.chunk_size,
-            chunk_overlap=settings.document.chunk_overlap,
-        )
-        sub_chunks = splitter.split(chunks)
-
-        # v1.4 上传链路脱敏：向量库内不落明文（手机号/身份证/银行卡/密钥等）
-        if settings.security.mask_sensitive:
-            from app.core.masker import mask_sensitive
-            for c in sub_chunks:
-                c.content = mask_sensitive(c.content)
-
-        # v1.1 配额校验（块数 + 文档数，-1 表示不限制）
-        registry = get_kb_registry()
-        kb = registry.get(collection_name)
-        vectorstore = get_vector_store(collection_name=collection_name)
-        existing_chunks = vectorstore.count()
-        doc_count = 0
-        if kb is not None and (kb.quota_chunks >= 0 or kb.quota_documents >= 0):
-            try:
-                metas = vectorstore.get_metadatas()
-                doc_count = len({m.get("filename", "unknown") for m in metas})
-            except Exception:
-                pass
-        if kb is not None and kb.quota_chunks >= 0 and \
-                existing_chunks + len(sub_chunks) > kb.quota_chunks:
-            raise HTTPException(
-                status_code=403,
-                detail=f"知识库 '{collection_name}' 块数配额 {kb.quota_chunks} 已满"
-                       f"（当前 {existing_chunks}，本次新增 {len(sub_chunks)}），请联系管理员调整配额")
-        if kb is not None and kb.quota_documents >= 0 and doc_count + 1 > kb.quota_documents:
-            raise HTTPException(
-                status_code=403,
-                detail=f"知识库 '{collection_name}' 文档数配额 {kb.quota_documents} 已满"
-                       f"（当前 {doc_count} 份），请联系管理员调整配额")
-
-        # 生成嵌入向量
-        embedding_service = EmbeddingService()
-        texts = [chunk.content for chunk in sub_chunks]
-        embeddings = await embedding_service.embed_text(texts)
-
-        # 存入向量数据库
-        ids = [f"{file_id}_{i}" for i in range(len(sub_chunks))]
-        metadatas = [chunk.metadata for chunk in sub_chunks]
-
-        vectorstore.add_documents(
-            ids=ids,
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
-
-        get_audit_logger().log(user.username, "document.upload", collection_name,
-                               f"上传 {file.filename}，共 {len(sub_chunks)} 块")
-
+        chunks_count = await _process_upload(
+            save_path, collection_name, user.username, file_id, file.filename)
         return DocumentUploadResponse(
             filename=file.filename,
-            chunks_count=len(sub_chunks),
+            chunks_count=chunks_count,
             collection_name=collection_name,
             status="success",
         )

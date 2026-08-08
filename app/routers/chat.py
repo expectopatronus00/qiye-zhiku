@@ -53,6 +53,7 @@ class ChatResponse(BaseModel):
     rewritten_query: Optional[str] = None  # 改写后的查询（仅发生改写时返回）
     message_id: str = ""  # 助手消息 ID（v1.2 反馈锚点）
     retrieval_debug: Optional[dict] = None  # 检索诊断（v1.2 详情面板）
+    cached: bool = False  # v1.5 是否命中热门问题缓存
 
 
 class FeedbackRequest(BaseModel):
@@ -229,10 +230,34 @@ def _get_or_create_conv(request: ChatRequest):
 
 @router.post("/completions", response_model=ChatResponse)
 async def chat_completion(request: ChatRequest, user: User = Depends(get_current_user)):
-    """非流式对话接口（多轮 + Query 改写 + 检索诊断 v1.2）"""
+    """非流式对话接口（多轮 + Query 改写 + 检索诊断 v1.2 + v1.5 热门问题缓存）"""
     require_kb_access(request.collection_name, user)
     llm = LLMService()
     conv = _get_or_create_conv(request)
+
+    # v1.5 热门问题缓存：仅新对话（无 conversation_id）的纯 RAG 请求可命中
+    cacheable = (
+        request.use_rag and not request.stream
+        and not request.conversation_id and settings.cache.enabled
+    )
+    if cacheable:
+        from app.core.cache import qa_cache
+        cached = qa_cache.get(request.collection_name, request.message)
+        if cached is not None:
+            # 命中：仍落对话记录（保证反馈锚点与历史一致），跳过 LLM/检索
+            conv.add_message("user", request.message)
+            msg = conv.add_message("assistant", cached["answer"], sources=cached["sources"])
+            conversation_manager.save(conv)
+            get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
+                                   f"对话 {conv.id}，问题: {request.message[:80]}（缓存命中）")
+            return ChatResponse(
+                answer=cached["answer"],
+                sources=cached["sources"],
+                model=llm.model,
+                conversation_id=conv.id,
+                message_id=msg.id,
+                cached=True,
+            )
 
     messages, sources, rewritten_query, retrieval_debug = await _prepare_rag_messages(llm, conv, request)
 
@@ -245,6 +270,11 @@ async def chat_completion(request: ChatRequest, user: User = Depends(get_current
     # 记录助手回复
     msg = conv.add_message("assistant", answer, sources=sources)
     conversation_manager.save(conv)
+
+    if cacheable:
+        from app.core.cache import qa_cache
+        qa_cache.set(request.collection_name, request.message,
+                     {"answer": answer, "sources": sources})
 
     get_audit_logger().log(user.username, "chat.completion", conv.collection_name,
                            f"对话 {conv.id}，问题: {request.message[:80]}")

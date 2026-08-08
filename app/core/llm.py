@@ -64,21 +64,33 @@ class LLMService:
 
         temperature 覆盖配置值（如评估裁判固定使用低温），None 则用配置
         """
-        if self.provider == "ollama":
-            return await self._chat_ollama(messages, temperature)
-        elif self._is_openai_compat():
-            return await self._chat_openai(messages, temperature)
-        else:
-            raise ValueError(f"不支持的 LLM 提供者: {self.provider}")
+        import time as _t
+        _start = _t.perf_counter()
+        try:
+            if self.provider == "ollama":
+                return await self._chat_ollama(messages, temperature)
+            elif self._is_openai_compat():
+                return await self._chat_openai(messages, temperature)
+            else:
+                raise ValueError(f"不支持的 LLM 提供者: {self.provider}")
+        finally:
+            from app.core.metrics import record_duration  # 延迟导入避免循环依赖
+            record_duration("llm", _t.perf_counter() - _start)
 
     async def chat_stream(self, messages: list[dict], temperature: Optional[float] = None) -> AsyncGenerator[str, None]:
-        """流式对话请求"""
-        if self.provider == "ollama":
-            async for chunk in self._chat_ollama_stream(messages, temperature):
-                yield chunk
-        elif self._is_openai_compat():
-            async for chunk in self._chat_openai_stream(messages, temperature):
-                yield chunk
+        """流式对话请求（v1.5 含耗时埋点）"""
+        import time as _t
+        _start = _t.perf_counter()
+        try:
+            if self.provider == "ollama":
+                async for chunk in self._chat_ollama_stream(messages, temperature):
+                    yield chunk
+            elif self._is_openai_compat():
+                async for chunk in self._chat_openai_stream(messages, temperature):
+                    yield chunk
+        finally:
+            from app.core.metrics import record_duration  # 延迟导入避免循环依赖
+            record_duration("llm", _t.perf_counter() - _start)
 
     async def chat_with_tools(self, messages: list[dict], tools: list[dict],
                               temperature: Optional[float] = None) -> LLMResponse:

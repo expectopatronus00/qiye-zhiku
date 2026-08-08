@@ -71,6 +71,15 @@ class DocumentConfig(BaseModel):
     ocr_enabled: bool = True            # PDF 内嵌图片 OCR
     ocr_max_images_per_page: int = 3    # 每页最多 OCR 的图片数
     ocr_min_area: int = 8000            # 参与 OCR 的最小图片面积(px²)，过滤小图标
+    # ---- 异步任务 (v1.5 性能与高可用) ----
+    async_upload_threshold: int = 5 * 1024 * 1024  # 超过该字节数的上传走后台任务（默认 5MB），避免大文档阻塞请求
+
+
+class CacheConfig(BaseModel):
+    """热门问题缓存 (v1.5)"""
+    enabled: bool = True           # 是否启用问答缓存
+    maxsize: int = 256             # LRU 容量（问题数）
+    ttl_seconds: int = 3600        # 缓存条目有效期（1 小时）
 
 
 class RetrievalConfig(BaseModel):
@@ -119,6 +128,8 @@ class SecurityConfig(BaseModel):
     mask_sensitive: bool = True      # 敏感信息脱敏（上传入库 + 输出兜底双链路）
     login_alert_threshold: int = 3   # 同一用户连续登录失败达到该次数触发告警（security.alert 审计）
     password_min_length: int = 8     # 密码最小长度（等保 2.0 三级要求 ≥8 位且含复杂度）
+    # ---- 会话存储 (v1.5) ----
+    redis_url: str = ""              # 非空则登录会话共享到 Redis（多副本部署），空走 SQLite 单机模式
 
 
 class AgentConfig(BaseModel):
@@ -146,6 +157,7 @@ class Settings(BaseModel):
     eval: EvalConfig = EvalConfig()
     security: SecurityConfig = SecurityConfig()
     agent: AgentConfig = AgentConfig()
+    cache: CacheConfig = CacheConfig()
     data: DataConfig = DataConfig()
 
 

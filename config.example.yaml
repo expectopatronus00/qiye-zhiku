@@ -76,6 +76,8 @@ document:
     - ".csv"
   # 上传文件存储目录
   upload_directory: "./data/uploads"
+  # 大文档异步上传阈值（字节，v1.5：超过则转入后台任务队列，接口立即返回 task_id）
+  async_upload_threshold: 5242880
   # ---- 文档增强 (v0.5) ----
   # PDF 版面分析: 大于等于该字号(points)的文本块判定为标题
   heading_min_size: 13.0
@@ -166,6 +168,8 @@ security:
   login_alert_threshold: 3
   # 密码最小长度（等保三级 ≥8 位；同时要求大写/小写/数字/特殊字符至少 3 类、禁弱口令）
   password_min_length: 8
+  # 会话共享 Redis 地址（v1.5：非空则登录会话共享到 Redis，多副本部署必配；空走 SQLite 单机模式）
+  redis_url: ""
 
 # Agent 模式配置 (v0.9)
 agent:
@@ -173,3 +177,12 @@ agent:
   max_iterations: 6
   # Agent 默认检索的知识库
   default_collection: "default"
+
+# 热门问题缓存 (v1.5)
+cache:
+  # 是否启用问答结果缓存
+  enabled: true
+  # LRU 容量（问题数，超出淘汰最久未用）
+  maxsize: 256
+  # 缓存有效期（秒，1 小时）
+  ttl_seconds: 3600

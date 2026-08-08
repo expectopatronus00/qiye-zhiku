@@ -20,6 +20,7 @@
 | Day 12 | v1.2 | 检索效果工程 | ✅ 标准 RRF 融合（k=60 + 可调 BM25 权重，双路命中提分）、检索诊断数据（各路径排名/得分/融合分/耗时，前端"检索详情"折叠面板）、用户反馈闭环（消息 ID 锚点、👍/👎+原因+期望回答落库、管理台反馈 Tab + 一键导出回流评测集）、黄金评测集一键回归（eval/run_regression.py：hit@5/MRR/top1 混合 vs 纯向量对比 + 基线自动保存），修复 LLMService 缺失 ollama_base_url 隐藏 bug |
 | Day 13 | v1.3 | 信创适配 | ✅ 国产 GPU 推理 provider 即配即用（昇腾 CANN / 寒武纪 MLU / 摩尔线程，OpenAI 兼容协议 + provider 白名单校验 + 管理台热更新 + readyz 探测）、向量库抽象层（get_vector_store 工厂路由，新增 Milvus 后端：COSINE/字符串主键/metadata JSON 序列化）、x86_64+arm64 双架构镜像（buildx 脚本）、麒麟 V10 / 统信 UOS 部署手册（二进制 + Docker 双形态 + systemd + 昇腾接入示例 + 验收清单），修复嵌入服务硬编码 localhost |
 | Day 14 | v1.4 | 数据安全与等保 | ✅ 敏感信息脱敏双链路（上传入库前 + 输出兜底，completions/stream/agent 三处，手机号/身份证/银行卡/API Key/长Token/邮箱 6 类规则）、密码强度策略（≥8 位 + 3 类复杂度 + 弱口令黑名单 + 禁含用户名 + 改密禁同原密码，注册/改密/重置全入口）、登录失败告警（连续失败达阈值 → security.alert 审计 + WARNING 日志，锁定联动防刷屏）、HTTPS 一键启用（server.ssl_* 配置即切换 + 自签证书脚本）、等保 2.0 三级自查清单（docs/dengbao-checklist.md），修复 chat.py 缺 settings 导入与 preview _sort_key bug |
+| Day 15 | v1.5 | 性能与高可用 | ✅ 异步任务队列（TaskManager：SQLite 持久化 + 2 worker 线程池 + 处理器注册表 + async 自动包装，大文档超阈值转后台索引立即返回 task_id，GET /api/tasks 查询/过滤，前端轮询展示"后台处理中"）、Prometheus 指标（/metrics 手写文本格式：QPS 计数 + 请求/检索/LLM 延迟直方图，中间件与业务埋点零依赖）、热门问题缓存（LRU 256 + TTL 1h，问题标准化 key，纯 RAG 新会话命中 cached:true，上传/删库按库失效）、Redis 会话共享（security.redis_url 配置即启用，token→user 映射 + TTL，故障自动回退 SQLite 双写，多副本部署前提），修复上传异步响应模型 Union 序列化 500 |
 
 ## 后续演进（v1.1+）
 
@@ -31,7 +32,7 @@
 | v1.2 | 检索效果工程 | ✅ 混合检索（标准 RRF 融合 + 诊断数据）、用户反馈闭环（点赞/点踩 + 原因回流评估集）、黄金评测集自动回归（hit@5/MRR 对比基线）、检索诊断面板（召回/重排过程可视化） | 混合检索 MRR 较纯向量提升、反馈落库、回归一键跑 | RAG 效果口碑核心，演示"答得准" |
 | v1.3 | 信创适配 | ✅ 国产 GPU 推理 provider（昇腾 CANN / 寒武纪 MLU / 摩尔线程，OpenAI 兼容协议即配即用 + 白名单校验）、x86_64 + arm64 双架构镜像（buildx 脚本）、麒麟 V10 / 统信 UOS 部署手册（docs/xinchuang-deploy.md）、Milvus 国产向量库后端（工厂路由无感切换） | provider 配置即用（单测 31 项 + 真机配置视图验证）、双架构构建脚本就绪（本机无 Docker，交付物为脚本+手册）、Milvus 后端单测覆盖（本机无 Milvus，mock 客户端验证） | 信创招标硬门槛；信创生态全覆盖 |
 | v1.4 | 数据安全与等保 | ✅ 敏感信息脱敏双链路（上传入库前 + 输出兜底，手机号/身份证/银行卡/API Key/长Token/邮箱 6 类规则）、密码强度策略（≥8 位 + 复杂度 + 弱口令黑名单，注册/改密/重置全入口）、登录失败告警（连续失败达阈值 → security.alert 审计）、HTTPS 一键启用（server.ssl_* + 自签证书脚本）、等保2.0三级自查清单（docs/dengbao-checklist.md） | 脱敏命中率测试（单测 + 真机双链路验证）、HTTPS 端到端验证、审计完备 | 央企采购必答项 |
-| v1.5 | 性能与高可用 | 异步任务队列（大文档后台索引 + 任务状态）、Redis 会话共享 + 多实例负载均衡、Prometheus 指标（QPS/延迟/检索与 LLM 耗时）、热门问题缓存 | 100MB 文档上传不阻塞、双实例会话一致、指标可查 | 规模部署前提 |
+| v1.5 | 性能与高可用 | ✅ 异步任务队列（大文档后台索引 + 任务状态查询/过滤 + 前端轮询）、Prometheus 指标（/metrics：QPS/延迟/检索与 LLM 耗时直方图）、热门问题缓存（LRU+TTL，命中 cached:true，知识库变更按库失效）、Redis 会话共享（可选配置，故障回退 SQLite 双写） | 大文档上传不阻塞（300KB 真机验证 accepted→success）、缓存二次命中、/metrics 全指标可查、双实例会话一致（mock 单测） | 规模部署前提 |
 | v1.6 | 进阶能力 | 知识图谱（实体抽取 + 关系构建 + 图谱问答）、多模态（本地 VLM 图表理解）、Webhook 集成（飞书/钉钉通知） | 图谱问答链路可用、图表问答演示 | 差异化加分项 |
 
 ## 迭代原则

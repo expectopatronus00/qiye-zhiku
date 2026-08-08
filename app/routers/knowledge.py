@@ -70,6 +70,12 @@ async def delete_collection(name: str, user: User = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
     registry.delete(name)
+    # v1.5 知识库删除 → 热门问题缓存按库失效
+    try:
+        from app.core.cache import qa_cache
+        qa_cache.invalidate(name)
+    except Exception:
+        pass
     get_audit_logger().log(user.username, "kb.delete", name, "删除知识库")
     return {"status": "success", "message": f"知识库 '{name}' 已删除"}
 

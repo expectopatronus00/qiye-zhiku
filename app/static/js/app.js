@@ -1187,6 +1187,12 @@ async function uploadFiles() {
             }
 
             const data = await response.json();
+            // v1.5: 大文件走异步任务，立即返回 accepted + task_id，前端轮询状态
+            if (data.status === 'accepted' && data.task_id) {
+                await pollTask(data.task_id, statusDiv, file.name);
+                refreshStats();
+                continue;
+            }
             statusDiv.innerHTML = `<p class="upload-success">${data.filename}: ${data.chunks_count} 块已入库</p>`;
             refreshStats();
         } catch (err) {
@@ -1195,6 +1201,33 @@ async function uploadFiles() {
     }
 
     fileInput.value = '';
+}
+
+// v1.5: 轮询异步任务状态（大文档后台处理）
+async function pollTask(taskId, statusDiv, filename) {
+    const icon = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
+    let frame = 0;
+    for (let i = 0; i < 600; i++) {  // 最多轮询 5 分钟
+        statusDiv.innerHTML = `<p>${filename}: 后台处理中 ${icon[frame % icon.length]}</p>`;
+        frame++;
+        await new Promise(r => setTimeout(r, 500));
+        let task;
+        try {
+            task = await apiFetch(`/api/tasks/${taskId}`).then(r => r.json());
+        } catch {
+            continue;  // 网络抖动重试
+        }
+        if (task.status === 'success') {
+            const n = task.result && task.result.chunks_count;
+            statusDiv.innerHTML = `<p class="upload-success">${filename}: ${n ?? '完成'} 块已入库</p>`;
+            return;
+        }
+        if (task.status === 'failed') {
+            statusDiv.innerHTML = `<p class="upload-error">${filename}: 处理失败 — ${task.error || '未知错误'}</p>`;
+            return;
+        }
+    }
+    statusDiv.innerHTML = `<p class="upload-error">${filename}: 后台处理超时，请在任务列表查看状态</p>`;
 }
 
 // 刷新知识库统计

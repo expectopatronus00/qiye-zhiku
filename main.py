@@ -9,9 +9,10 @@ from app.core.config import settings
 from app.core.logging_setup import get_logger, request_log_middleware, setup_logging
 from app.core.vectorstore import get_vector_store
 from app.core.security import get_audit_logger, get_kb_registry, get_user_manager
-from app.routers import admin, auth, audit, chat, documents, health, knowledge
+from app.core.tasks import task_manager
+from app.routers import admin, auth, audit, chat, documents, health, knowledge, tasks
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.5.0"
 logger = get_logger("main")
 
 # 统一日志（文件轮转 + 控制台），启动即生效
@@ -34,6 +35,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["对话"])
 app.include_router(documents.router, prefix="/api/documents", tags=["文档"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["知识库"])
 app.include_router(admin.router, prefix="/api/admin", tags=["管理后台"])
+app.include_router(tasks.router, prefix="/api/tasks", tags=["任务"])
 
 # 静态文件
 static_dir = Path(__file__).parent / "app" / "static"
@@ -42,7 +44,8 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 @app.on_event("startup")
 async def startup():
-    """启动引导: 管理员初始化 + 存量知识库迁移归属管理员"""
+    """启动引导: 管理员初始化 + 存量知识库迁移归属管理员 + 任务队列 worker 启动"""
+    task_manager.start()  # v1.5 异步任务队列（幂等）
     if settings.security.auth_enabled:
         get_user_manager()  # 触发 bootstrap_admin
         registry = get_kb_registry()
