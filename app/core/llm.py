@@ -1,7 +1,26 @@
-"""LLM 调用模块 - 支持 Ollama / OpenAI（含 Function Calling / Tools API）"""
+"""LLM 调用模块 - 支持 Ollama / OpenAI / 国产化 provider（昇腾 CANN / 寒武纪 MLU / 摩尔线程）
+
+v1.3 信创适配：ascend/cambricon/mthreads 均为 OpenAI 兼容协议（/v1/chat/completions），
+由国产推理服务（vLLM-Ascend、vLLM 等）暴露，此处复用 OpenAI 通道并按其 base_url 路由。
+"""
 from typing import AsyncGenerator, Optional
 import httpx
-from app.core.config import settings
+from app.core.config import settings, validate_provider, VALID_LLM_PROVIDERS
+
+# 走 OpenAI 兼容协议（/v1/chat/completions）的 provider 集合
+OPENAI_COMPAT_PROVIDERS = {"openai", "ascend", "cambricon", "mthreads"}
+
+
+def resolve_openai_base_url() -> str:
+    """解析 OpenAI 兼容端点 base_url：按国产 provider 各自字段路由，未配置则回退 openai_base_url"""
+    provider = settings.llm.provider
+    if provider == "ascend":
+        return settings.llm.ascend_base_url or settings.llm.openai_base_url
+    if provider == "cambricon":
+        return settings.llm.cambricon_base_url or settings.llm.openai_base_url
+    if provider == "mthreads":
+        return settings.llm.mthreads_base_url or settings.llm.openai_base_url
+    return settings.llm.openai_base_url
 
 
 class LLMToolCall:
@@ -31,6 +50,14 @@ class LLMService:
         self.ollama_base_url = settings.llm.ollama_base_url
         self.openai_base_url = settings.llm.openai_base_url
         self.openai_api_key = settings.llm.openai_api_key
+        self.ascend_base_url = settings.llm.ascend_base_url
+        self.cambricon_base_url = settings.llm.cambricon_base_url
+        self.mthreads_base_url = settings.llm.mthreads_base_url
+        validate_provider(self.provider, VALID_LLM_PROVIDERS, "LLM")
+
+    def _is_openai_compat(self) -> bool:
+        """是否走 OpenAI 兼容协议（openai + 三个国产 provider）"""
+        return self.provider in OPENAI_COMPAT_PROVIDERS
 
     async def chat(self, messages: list[dict], temperature: Optional[float] = None) -> str:
         """发送对话请求，返回完整响应
@@ -39,7 +66,7 @@ class LLMService:
         """
         if self.provider == "ollama":
             return await self._chat_ollama(messages, temperature)
-        elif self.provider == "openai":
+        elif self._is_openai_compat():
             return await self._chat_openai(messages, temperature)
         else:
             raise ValueError(f"不支持的 LLM 提供者: {self.provider}")
@@ -49,7 +76,7 @@ class LLMService:
         if self.provider == "ollama":
             async for chunk in self._chat_ollama_stream(messages, temperature):
                 yield chunk
-        elif self.provider == "openai":
+        elif self._is_openai_compat():
             async for chunk in self._chat_openai_stream(messages, temperature):
                 yield chunk
 
@@ -62,7 +89,7 @@ class LLMService:
         """
         if self.provider == "ollama":
             return await self._chat_ollama_tools(messages, tools, temperature)
-        elif self.provider == "openai":
+        elif self._is_openai_compat():
             return await self._chat_openai_tools(messages, tools, temperature)
         else:
             raise ValueError(f"不支持的 LLM 提供者: {self.provider}")
@@ -159,14 +186,14 @@ class LLMService:
 
     async def _chat_openai_tools(self, messages: list[dict], tools: list[dict],
                                  temperature: Optional[float]) -> LLMResponse:
-        """OpenAI 工具调用（chat/completions 的 tools 参数）"""
+        """OpenAI 兼容工具调用（chat/completions 的 tools 参数；国产 provider 复用此通道）"""
+        headers = {"Content-Type": "application/json"}
+        if self.openai_api_key:
+            headers["Authorization"] = f"Bearer {self.openai_api_key}"
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{settings.llm.openai_base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.llm.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
+                f"{resolve_openai_base_url()}/chat/completions",
+                headers=headers,
                 json={
                     "model": self.model,
                     "messages": messages,
@@ -188,14 +215,14 @@ class LLMService:
             return LLMResponse(content=message.get("content", ""), tool_calls=tool_calls)
 
     async def _chat_openai(self, messages: list[dict], temperature: Optional[float]) -> str:
-        """OpenAI 同步对话"""
+        """OpenAI 兼容同步对话（国产 provider 复用此通道）"""
+        headers = {"Content-Type": "application/json"}
+        if self.openai_api_key:
+            headers["Authorization"] = f"Bearer {self.openai_api_key}"
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{settings.llm.openai_base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.llm.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
+                f"{resolve_openai_base_url()}/chat/completions",
+                headers=headers,
                 json={
                     "model": self.model,
                     "messages": messages,
@@ -208,15 +235,15 @@ class LLMService:
             return data["choices"][0]["message"]["content"]
 
     async def _chat_openai_stream(self, messages: list[dict], temperature: Optional[float]) -> AsyncGenerator[str, None]:
-        """OpenAI 流式对话"""
+        """OpenAI 兼容流式对话（国产 provider 复用此通道）"""
+        headers = {"Content-Type": "application/json"}
+        if self.openai_api_key:
+            headers["Authorization"] = f"Bearer {self.openai_api_key}"
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
-                f"{settings.llm.openai_base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.llm.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
+                f"{resolve_openai_base_url()}/chat/completions",
+                headers=headers,
                 json={
                     "model": self.model,
                     "messages": messages,

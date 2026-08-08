@@ -1,7 +1,12 @@
-# 企业智库 RAG 问答系统 - Docker Compose 一键部署 (v1.0)
+# 企业智库 RAG 问答系统 - Docker Compose 一键部署 (v1.3 信创适配)
 # 用法: docker compose up -d   （首次启动后访问 http://localhost:8000）
 #
 # 需要 GPU 加速时（NVIDIA 容器运行时）取消下面 app.llm 的 deploy 注释
+#
+# 信创环境（鲲鹏/飞腾 arm64）说明:
+#   - ollama 镜像自动拉取 arm64 变体；app 镜像用 scripts/build_dual_arch.sh 双架构构建
+#   - 昇腾/寒武纪/摩尔线程等国产 GPU: 用 vLLM-Ascend 等部署 OpenAI 兼容服务后，
+#     改 config.yaml: llm.provider=ascend, llm.ascend_base_url=http://<推理服务>:8000/v1
 services:
   app:
     build: .

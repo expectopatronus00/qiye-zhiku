@@ -5,9 +5,9 @@
 
 ## 项目是什么
 
-面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.2（检索效果工程），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.2 已完成）。
+面向央企 AI 场景的私有化 RAG 知识库问答系统（FastAPI + ChromaDB/Milvus + Ollama qwen2.5:7b + nomic-embed-text + bge-reranker-base）。当前版本 v1.3（信创适配），路线见 ROADMAP.md，迭代进度按"每日一版"节奏推进（v0.1~v1.3 已完成）。
 
-技术栈：Python 3.11 / FastAPI / ChromaDB / SQLite / jieba / PyMuPDF / RapidOCR / pytest。
+技术栈：Python 3.11 / FastAPI / ChromaDB / Milvus(可选) / SQLite / jieba / PyMuPDF / RapidOCR / pytest。
 
 ## 快速启动（本机开发环境）
 
@@ -32,10 +32,10 @@ Docker 部署：`docker compose up --build`（app + ollama 编排、非 root、�
 ```
 main.py            入口：路由挂载 + 日志中间件 + 启动引导（管理员初始化/存量知识库迁移）
 app/core/          核心逻辑
-  config.py        config.yaml 加载（pydantic，LLM/Embedding/VectorStore/Security 各配置块）
-  llm.py           LLM 统一接口（ollama/openai 双 provider；chat_stream SSE 流式；新 provider 在此扩展）
-  embeddings.py    嵌入（ollama / openai / 本地模型路径）
-  vectorstore.py   向量库（ChromaDB；list_collections/upsert/query，新后端在此扩展）
+  config.py        config.yaml 加载（pydantic 各配置块）；v1.3 国产 provider 白名单 VALID_LLM_PROVIDERS/validate_provider + 向量库类型校验
+  llm.py           LLM 统一接口（ollama / openai 兼容多 provider：openai+ascend+cambricon+mthreads 走 OPENAI_COMPAT_PROVIDERS，resolve_openai_base_url 按 provider 路由；chat_stream SSE 流式）
+  embeddings.py    嵌入（ollama / openai 兼容多 provider，resolve_embedding_base_url 路由；注意 ollama 通道走 llm.ollama_base_url）
+  vectorstore.py   向量库（BaseVectorStore 协议 + ChromaVectorStore + MilvusVectorStore；get_vector_store 工厂按 vectorstore.type 路由，旧 VectorStore 类名保留为 Chroma 别名）
   retriever.py     检索（向量语义 + BM25 关键词双路召回，jieba 分词；标准 RRF 融合 k=60，last_debug 诊断数据）
   reranker.py      重排（bge-reranker-base cross-encoder，模型缺失自动降级启发式）
   query_rewriter.py 多轮追问 Query 改写（补全指代）
@@ -53,10 +53,12 @@ app/routers/       API 层（prefix 各自带 /api）
   knowledge.py     知识库（/api/knowledge，创建/查询/统计）
   audit.py         审计（/api/audit，仅管理员；GET /export CSV 带 BOM）
   admin.py         管理后台（/api/admin：用户管理/知识库配额/系统配置热更新/反馈列表与回流导出，仅管理员）
-  health.py        健康检查（/healthz 存活 + /readyz 就绪探测：向量库/DB/LLM 三段判定）
+  health.py        健康检查（/healthz 存活 + /readyz 就绪探测：向量库/DB/LLM 三段判定；LLM 探测按 provider 分支，国产走 /models）
 app/static/index.html  前端单页（原生 JS，深色设计系统 + 浅色主题，无构建步骤）
 eval/run_regression.py  黄金评测集一键回归（hit@5/MRR/top1，混合 vs 纯向量，基线对比；--collect-feedback 合并回流）
-tests/             pytest 测试（145 项，按模块拆分 test_*.py）
+scripts/build_dual_arch.sh  x86_64+arm64 双架构镜像构建推送（buildx）
+docs/xinchuang-deploy.md    麒麟 V10 / 统信 UOS 信创部署手册（二进制+Docker 双形态）
+tests/             pytest 测试（176 项，按模块拆分 test_*.py）
 ```
 
 ## 常用命令
@@ -84,6 +86,10 @@ curl http://127.0.0.1:8766/healthz && curl http://127.0.0.1:8766/readyz
 11. LLMService 的 provider 相关 URL/key 属性必须在 __init__ 赋值（ollama_base_url 曾漏赋值导致真机问答才暴露）
 12. 反馈表在 security.db（feedback 表），消息 ID 为 conversation JSON 中 Message.id（uuid hex[:12]），管理端反馈列表走 /api/admin/feedback
 13. 回归脚本控制台中文在 GBK 终端显示乱码属正常，报告写 data/eval_reports/ 文件
+14. **uvicorn 重启必查端口**：taskkill 只杀父进程，旧 worker 仍占 8766（netstat -ano | grep :8766 确认监听 PID 再杀）；否则新代码不生效且日志报 bind 10048
+15. 国产 provider（ascend/cambricon/mthreads）走 OpenAI 兼容协议：base_url 未配置回退 openai_base_url；api_key 空则省略 Authorization 头（内网无鉴权服务）
+16. Milvus 后端 pymilvus 延迟导入（未安装时 Chroma 路径不受影响）；metadata 用 JSON 字符串存储（Milvus 不支持嵌套 dict 字段），search 返回时解析回 dict；本机无 Docker/Milvus，后端验证靠 mock 单测
+17. 嵌入 ollama 通道必须走 settings.llm.ollama_base_url（曾硬编码 localhost:11434，容器部署时嵌入连不上 Ollama）；向量库统一走 get_vector_store 工厂，禁止直接 new ChromaVectorStore/MilvusVectorStore
 
 ## 迭代工作流（每个版本必须）
 

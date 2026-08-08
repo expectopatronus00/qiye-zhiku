@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.core.logging_setup import get_logger, request_log_middleware, setup_logging
-from app.core.vectorstore import VectorStore
+from app.core.vectorstore import get_vector_store
 from app.core.security import get_audit_logger, get_kb_registry, get_user_manager
 from app.routers import admin, auth, audit, chat, documents, health, knowledge
 
@@ -47,7 +47,7 @@ async def startup():
         get_user_manager()  # 触发 bootstrap_admin
         registry = get_kb_registry()
         try:
-            existing = VectorStore().list_collections()
+            existing = get_vector_store().list_collections()
             registry.migrate_existing(existing, settings.security.admin_username)
             get_audit_logger().log(settings.security.admin_username,
                                    "system.startup", "",

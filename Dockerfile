@@ -1,6 +1,14 @@
-# 企业智库 RAG 问答系统 - 生产镜像 (v1.0)
+# 企业智库 RAG 问答系统 - 生产镜像 (v1.3 信创适配)
+#
+# 双架构（x86_64 + arm64）构建说明：
+#   python:3.11-slim 官方镜像同时发布 amd64 与 arm64 变体，
+#   用 docker buildx 一次构建两架构并推送（见 scripts/build_dual_arch.sh）：
+#     docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/qiye-zhiku:latest --push .
+#   鲲鹏 920/飞腾 S2500 等 arm64 服务器拉取时自动匹配 arm64 变体。
+# TARGETARCH 由 buildx 自动注入（amd64/arm64），可用于架构感知的启动逻辑。
 FROM python:3.11-slim
 
+ARG TARGETARCH
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TZ=Asia/Shanghai \

@@ -9,7 +9,8 @@ server:
 
 # LLM 配置
 llm:
-  # 可选: ollama | openai
+  # 可选: ollama | openai | ascend | cambricon | mthreads
+  #   ascend=昇腾 CANN / cambricon=寒武纪 MLU / mthreads=摩尔线程（均走 OpenAI 兼容协议）
   provider: "ollama"
   # Ollama 模型名
   model: "qwen2.5:7b"
@@ -18,28 +19,41 @@ llm:
   # OpenAI 配置（provider 为 openai 时使用）
   openai_api_key: ""
   openai_base_url: "https://api.openai.com/v1"
+  # 国产化推理服务地址（v1.3 信创适配，provider 为 ascend/cambricon/mthreads 时使用；
+  # 留空回退 openai_base_url；内网无鉴权时 openai_api_key 留空即可）
+  ascend_base_url: ""
+  cambricon_base_url: ""
+  mthreads_base_url: ""
   # 生成参数
   temperature: 0.3
   max_tokens: 2048
 
 # 嵌入模型配置
 embedding:
-  # 可选: ollama | openai | local
+  # 可选: ollama | openai | ascend | cambricon | mthreads | local
   provider: "ollama"
   model: "nomic-embed-text"
   # OpenAI 配置（provider 为 openai 时使用）
   openai_api_key: ""
   openai_base_url: "https://api.openai.com/v1"
+  # 国产化嵌入服务地址（v1.3 信创适配，如国产栈上的 bge-m3）
+  ascend_base_url: ""
+  cambricon_base_url: ""
+  mthreads_base_url: ""
   # 本地模型路径（provider 为 local 时使用）
   local_model_path: ""
 
 # 向量数据库配置
 vectorstore:
-  # 可选: chroma | faiss
+  # 可选: chroma | milvus
   type: "chroma"
-  # 持久化目录
+  # 持久化目录（Chroma 使用）
   persist_directory: "./data/vectorstore"
-  # 向量维度（需与嵌入模型匹配）
+  # Milvus 服务地址（v1.3 信创适配，type 为 milvus 时使用）
+  milvus_uri: "http://localhost:19530"
+  # Milvus 鉴权 token（如 user:password，未开启鉴权留空）
+  milvus_token: ""
+  # 向量维度（需与嵌入模型匹配：nomic-embed-text=768，bge-m3=1024）
   dimension: 768
 
 # 文档处理配置

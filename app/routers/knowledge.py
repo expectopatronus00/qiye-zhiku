@@ -9,7 +9,7 @@ from app.core.security import (
     get_kb_registry,
     require_admin,
 )
-from app.core.vectorstore import VectorStore
+from app.core.vectorstore import get_vector_store
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ async def list_collections(user: User = Depends(get_current_user)):
     registry = get_kb_registry()
     result = []
     for kb in registry.list_for(user):
-        vs = VectorStore(collection_name=kb.name)
+        vs = get_vector_store(collection_name=kb.name)
         result.append({
             "name": kb.name,
             "chunk_count": vs.count(),
@@ -48,7 +48,7 @@ async def create_collection(name: str, user: User = Depends(get_current_user)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # 真正创建 Chroma collection（惰性创建，确保计数可用）
-    VectorStore(collection_name=name)
+    get_vector_store(collection_name=name)
     get_audit_logger().log(user.username, "kb.create", name, "创建知识库")
     return CollectionInfo(
         name=kb.name, chunk_count=0,
@@ -66,7 +66,7 @@ async def delete_collection(name: str, user: User = Depends(get_current_user)):
     if not user.is_admin and kb.owner != user.username:
         raise HTTPException(status_code=403, detail=f"无权删除知识库 '{name}'（仅属主或管理员可用）")
     try:
-        VectorStore(collection_name=name).delete_collection()
+        get_vector_store(collection_name=name).delete_collection()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
     registry.delete(name)

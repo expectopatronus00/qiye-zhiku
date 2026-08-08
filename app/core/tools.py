@@ -160,10 +160,10 @@ async def search_knowledge_base(query: str, collection: str = "default",
 async def preview_document(filename: str, collection: str = "default", user=None) -> dict:
     """读取文档全文（按原文顺序返回所有块）"""
     from app.core.security import require_kb_access
-    from app.core.vectorstore import VectorStore
+    from app.core.vectorstore import get_vector_store
 
     require_kb_access(collection, user)
-    vectorstore = VectorStore(collection_name=collection)
+    vectorstore = get_vector_store(collection_name=collection)
     try:
         result = vectorstore.collection.get(where={"filename": filename},
                                             include=["documents", "metadatas"])
@@ -200,13 +200,13 @@ async def preview_document(filename: str, collection: str = "default", user=None
 async def list_knowledge_bases(user=None) -> dict:
     """列出可见知识库及规模"""
     from app.core.security import get_kb_registry
-    from app.core.vectorstore import VectorStore
+    from app.core.vectorstore import get_vector_store
 
     kbs = get_kb_registry().list_for(user)
     result = []
     for kb in kbs:
         try:
-            count = VectorStore(collection_name=kb.name).count()
+            count = get_vector_store(collection_name=kb.name).count()
         except Exception:
             count = 0
         result.append({"name": kb.name, "owner": kb.owner, "chunk_count": count})
@@ -220,10 +220,10 @@ async def list_knowledge_bases(user=None) -> dict:
 async def knowledge_base_stats(collection: str = "default", user=None) -> dict:
     """知识库统计"""
     from app.core.security import require_kb_access
-    from app.core.vectorstore import VectorStore
+    from app.core.vectorstore import get_vector_store
 
     require_kb_access(collection, user)
-    vectorstore = VectorStore(collection_name=collection)
+    vectorstore = get_vector_store(collection_name=collection)
     try:
         data = vectorstore.collection.get(include=["metadatas"])
     except Exception:

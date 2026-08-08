@@ -16,7 +16,7 @@ from app.core.security import (
     get_user_manager,
     require_admin,
 )
-from app.core.vectorstore import VectorStore
+from app.core.vectorstore import get_vector_store
 
 router = APIRouter()
 
@@ -145,7 +145,7 @@ class QuotaPatch(BaseModel):
 
 def _kb_usage(name: str) -> dict:
     """知识库用量：块数 + 文档数（元数据 filename 去重）"""
-    vs = VectorStore(collection_name=name)
+    vs = get_vector_store(collection_name=name)
     chunk_count = vs.count()
     doc_count = 0
     try:

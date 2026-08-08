@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.document import DocumentParser, TextSplitter
 from app.core.embeddings import EmbeddingService
-from app.core.vectorstore import VectorStore
+from app.core.vectorstore import get_vector_store
 from app.core.security import (
     User,
     get_audit_logger,
@@ -80,7 +80,7 @@ async def upload_document(
         # v1.1 配额校验（块数 + 文档数，-1 表示不限制）
         registry = get_kb_registry()
         kb = registry.get(collection_name)
-        vectorstore = VectorStore(collection_name=collection_name)
+        vectorstore = get_vector_store(collection_name=collection_name)
         existing_chunks = vectorstore.count()
         doc_count = 0
         if kb is not None and (kb.quota_chunks >= 0 or kb.quota_documents >= 0):
@@ -147,7 +147,7 @@ async def list_documents(
 ):
     """列出知识库中的文档信息（需知识库访问权限）"""
     require_kb_access(collection_name, user)
-    vectorstore = VectorStore(collection_name=collection_name)
+    vectorstore = get_vector_store(collection_name=collection_name)
     total = vectorstore.count()
 
     # 获取所有文档的元数据
@@ -172,7 +172,7 @@ async def preview_document(
 ):
     """预览文档内容：返回该文档在知识库中的全部文本块（需知识库访问权限）"""
     require_kb_access(collection_name, user)
-    vectorstore = VectorStore(collection_name=collection_name)
+    vectorstore = get_vector_store(collection_name=collection_name)
 
     try:
         # 按 filename 过滤查询全部块

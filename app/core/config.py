@@ -11,12 +11,29 @@ class ServerConfig(BaseModel):
     debug: bool = False
 
 
+# 国产化 provider 白名单 (v1.3 信创适配)
+# ascend=昇腾 CANN(vLLM-Ascend) / cambricon=寒武纪 MLU / mthreads=摩尔线程，
+# 三者均走 OpenAI 兼容协议（/v1/chat/completions），base_url 指向前端推理服务地址
+VALID_LLM_PROVIDERS = {"ollama", "openai", "ascend", "cambricon", "mthreads"}
+VALID_EMBEDDING_PROVIDERS = {"ollama", "openai", "ascend", "cambricon", "mthreads"}
+VALID_VECTORSTORE_TYPES = {"chroma", "milvus"}
+
+
+def validate_provider(provider: str, valid: set[str], kind: str) -> None:
+    """校验 provider 取值，非法值抛 ValueError（管理台热更新与启动时调用）"""
+    if provider not in valid:
+        raise ValueError(f"不支持的{kind}提供者: {provider}，可选: {sorted(valid)}")
+
+
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     model: str = "qwen2.5:7b"
     ollama_base_url: str = "http://localhost:11434"  # Ollama 服务地址（容器部署时指向 ollama 服务）
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
+    ascend_base_url: str = ""       # 昇腾 CANN 推理服务（vLLM-Ascend OpenAI 兼容端点）
+    cambricon_base_url: str = ""    # 寒武纪 MLU 推理服务
+    mthreads_base_url: str = ""     # 摩尔线程推理服务
     temperature: float = 0.3
     max_tokens: int = 2048
 
@@ -26,6 +43,9 @@ class EmbeddingConfig(BaseModel):
     model: str = "nomic-embed-text"
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
+    ascend_base_url: str = ""       # 昇腾 CANN 嵌入服务（国产栈上跑 bge-m3 等）
+    cambricon_base_url: str = ""
+    mthreads_base_url: str = ""
     local_model_path: str = ""
 
 
@@ -33,6 +53,8 @@ class VectorStoreConfig(BaseModel):
     type: str = "chroma"
     persist_directory: str = "./data/vectorstore"
     dimension: int = 768
+    milvus_uri: str = "http://localhost:19530"   # Milvus 服务地址（信创/大规模场景）
+    milvus_token: str = ""                        # Milvus 鉴权 token（如 user:password，空则不鉴权）
 
 
 class DocumentConfig(BaseModel):
@@ -145,8 +167,10 @@ settings = load_settings()
 # openai_api_key 可更新但查看时脱敏，留空表示保留原值）
 ADMIN_EDITABLE: dict[str, set[str]] = {
     "llm": {"provider", "model", "ollama_base_url", "openai_base_url",
+            "ascend_base_url", "cambricon_base_url", "mthreads_base_url",
             "temperature", "max_tokens", "openai_api_key"},
-    "embedding": {"provider", "model", "local_model_path", "openai_api_key"},
+    "embedding": {"provider", "model", "local_model_path", "openai_api_key",
+                  "ascend_base_url", "cambricon_base_url", "mthreads_base_url"},
     "retrieval": {"top_k", "score_threshold", "hybrid_search", "bm25_weight"},
     "reranker": {"enabled", "type", "top_n"},
     "query_rewrite": {"enabled", "max_history_turns"},
@@ -182,6 +206,13 @@ def update_config(patch: dict) -> dict:
             if field == "openai_api_key" and str(value).strip() == "":
                 continue  # 空串保留原密钥
             setattr(current, field, value)
+    # 热更新后校验 provider 白名单（v1.3 信创适配），非法值回滚并抛错
+    try:
+        validate_provider(settings.llm.provider, VALID_LLM_PROVIDERS, "LLM")
+        validate_provider(settings.embedding.provider, VALID_EMBEDDING_PROVIDERS, "嵌入")
+    except ValueError:
+        _write_config(settings)  # 回滚为已写入状态，避免内存与文件不一致
+        raise
     _write_config(settings)
     return get_config_view()
 

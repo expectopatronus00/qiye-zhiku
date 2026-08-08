@@ -17,7 +17,7 @@ v1.2 优化（检索效果工程）：
 import time
 from typing import Optional
 from app.core.config import settings
-from app.core.vectorstore import VectorStore
+from app.core.vectorstore import get_vector_store
 from app.core.embeddings import EmbeddingService
 from app.core.reranker import reranker
 
@@ -40,7 +40,7 @@ class Retriever:
     """混合检索器"""
 
     def __init__(self, collection_name: str = "default"):
-        self.vectorstore = VectorStore(collection_name=collection_name)
+        self.vectorstore = get_vector_store(collection_name=collection_name)
         self.embedding_service = EmbeddingService()
         self.top_k = settings.retrieval.top_k
         self.hybrid = settings.retrieval.hybrid_search

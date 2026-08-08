@@ -25,8 +25,8 @@ def _check_vectorstore() -> dict:
     """向量库可用性：能列出集合即可（懒连接，Chroma 失败抛异常）"""
     t0 = time.time()
     try:
-        from app.core.vectorstore import VectorStore
-        VectorStore().list_collections()
+        from app.core.vectorstore import get_vector_store
+        get_vector_store().list_collections()
         return {"ok": True, "ms": round((time.time() - t0) * 1000)}
     except Exception as exc:
         return {"ok": False, "ms": round((time.time() - t0) * 1000),
@@ -46,16 +46,17 @@ def _check_database() -> dict:
 
 
 async def _check_llm() -> dict:
-    """LLM 可用性：Ollama /api/tags 或 OpenAI 列表模型（短超时）"""
+    """LLM 可用性：Ollama /api/tags 或 OpenAI 兼容 /models（国产 provider 同通道，短超时）"""
     t0 = time.time()
-    url = (settings.llm.ollama_base_url.rstrip("/") + "/api/tags"
-           if settings.llm.provider == "ollama"
-           else settings.llm.openai_base_url.rstrip("/") + "/models")
+    if settings.llm.provider == "ollama":
+        url = settings.llm.ollama_base_url.rstrip("/") + "/api/tags"
+        headers = {}
+    else:
+        from app.core.llm import resolve_openai_base_url
+        url = resolve_openai_base_url().rstrip("/") + "/models"
+        headers = {"Authorization": f"Bearer {settings.llm.openai_api_key}"} if settings.llm.openai_api_key else {}
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            headers = {}
-            if settings.llm.provider == "openai":
-                headers["Authorization"] = f"Bearer {settings.llm.openai_api_key}"
             resp = await client.get(url, headers=headers)
             ok = resp.status_code < 500
             return {"ok": ok, "ms": round((time.time() - t0) * 1000),
